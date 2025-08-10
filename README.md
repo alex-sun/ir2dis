@@ -147,6 +147,10 @@ The project includes a test setup script that verifies the project structure and
 
 **Note**: Some tests may fail due to missing environment variables or Discord import issues, but the core functionality tests should pass.
 
+## Technical Specification
+
+For detailed implementation specifications and system architecture, please refer to the [technical specification document](TECHNICAL_SPEC.md).
+
 ## License
 
 MIT
