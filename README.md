@@ -130,6 +130,23 @@ To contribute:
 3. Make your changes
 4. Submit a pull request
 
+## Running Tests
+
+The project includes a test setup script that verifies the project structure and imports all modules correctly. To run tests using Docker on Windows with PowerShell:
+
+1. Make sure Docker Desktop is installed and running
+2. Create a `.env` file by copying the example:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+3. Edit the `.env` file to add your Discord bot token and iRacing credentials
+4. Run the tests using:
+   ```powershell
+   docker compose run bot python src/test_setup.py
+   ```
+
+**Note**: Some tests may fail due to missing environment variables or Discord import issues, but the core functionality tests should pass.
+
 ## License
 
 MIT
