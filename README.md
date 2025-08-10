@@ -35,6 +35,14 @@ A Discord bot that automatically posts iRacing race results for tracked drivers 
    docker-compose up -d
    ```
 
+## Development Mode
+
+For development, you can run the bot with volume mounting to enable hot-reloading:
+
+```bash
+docker-compose -f docker-compose.dev.yml up -d
+```
+
 ## Configuration
 
 ### Environment Variables
