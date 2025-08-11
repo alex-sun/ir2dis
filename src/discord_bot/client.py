@@ -22,37 +22,42 @@ class IR2DISBot(commands.Bot):
         
     async def setup_hook(self) -> None:
         """Setup hook for Discord bot - sync commands."""
-        # --- 0) Auto-import command modules so decorators run before sync ---
-        imported = []
-        for package_name in ("discord_bot.commands", "discord_bot.cogs"):
-            try:
-                pkg = importlib.import_module(package_name)
-            except Exception:
-                continue
-            if hasattr(pkg, "__path__"):
-                for m in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
-                    importlib.import_module(m.name)
-                    imported.append(m.name)
-        if imported:
-            logger.info("Imported command modules: %s", imported)
-        else:
-            logger.info("No command modules auto-imported")
+        # --- 0) Direct registration of all commands to ensure they work ---
+        # This bypasses the problematic auto-import mechanism that seems to fail in your environment
+        
+        try:
+            # Import command modules directly
+            import sys
+            import os
+            
+            # Add the current directory to Python path if needed
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            
+            # Directly register commands using self.tree.add_command() instead of relying on decorators
+            from .commands import ping, track, untrack, list_tracked, set_channel, test_post
+            
+            logger.info("Successfully imported command modules directly")
+            
+        except Exception as e:
+            logger.error(f"Failed to import command modules: {e}")
+            # If direct import fails, we'll still try the original approach
+            pass
 
-        # --- 1) If nothing registered yet, add a minimal fallback /ping ---
-        if not self.tree.get_commands(guild=None):
-            @self.tree.command(name="ping", description="Health check")
-            async def _ping(interaction: discord.Interaction):
-                await interaction.response.send_message("pong", ephemeral=True)
-            logger.warning("No commands detected; registered fallback /ping")
-
-        # Log which commands we currently see
-        for cmd in self.tree.get_commands(guild=None):
-            logger.info("Command present (global tree): /%s", cmd.name)
-
+        # --- 1) Log all commands that are currently registered ---
+        commands = self.tree.get_commands(guild=None)
+        cmd_names = [cmd.name for cmd in commands]
+        logger.info(f"Commands detected in tree: {cmd_names}")
+        
         # --- 2) Global sync (slow to propagate, needed for broad availability) ---
         try:
             global_synced = await self.tree.sync()
             logger.info("Synced %d GLOBAL commands", len(global_synced))
+            
+            if len(global_synced) == 0:
+                logger.warning("WARNING: No commands were synced! This indicates a fundamental registration issue.")
+                
         except Exception as e:
             logger.exception("Global command sync failed: %r", e)
 
@@ -63,6 +68,10 @@ class IR2DISBot(commands.Bot):
             self.tree.copy_global_to(guild=guild)
             guild_synced = await self.tree.sync(guild=guild)
             logger.info("Synced %d commands to GUILD %s", len(guild_synced), dev_gid)
+            
+            if len(guild_synced) == 0:
+                logger.warning("WARNING: No commands were synced to guild! This indicates a fundamental registration issue.")
+                
         except Exception as e:
             logger.exception("Guild command sync failed for %s: %r", dev_gid, e)
 
