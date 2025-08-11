@@ -231,4 +231,8 @@ Following the agent-friendly work plan milestones:
 - Database migration tests
 - Performance testing with simulated load
 
+## Contribution Standards
+
+All contributions should follow the commit message standards outlined in [CONTRIBUTING.md](CONTRIBUTING.md) to ensure consistent, meaningful commit messages that make our history easy to understand and parse.
+
 This technical specification serves as the comprehensive reference for understanding both the project requirements and implementation details. It should be consulted when working on any part of the system to maintain consistency and adherence to design principles.
