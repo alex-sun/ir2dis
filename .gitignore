@@ -10,9 +10,4 @@ src/observability/__pycache__/*
 src/poller/__pycache__/*
 
 src/store/__pycache__/*
-src/utils/__pycache__/*data/*.db
-*.sqlite
-*.sqlite3
-data/*.db
-*.sqlite
-*.sqlite3
+src/utils/__pycache__/*

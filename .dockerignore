@@ -1,6 +1,6 @@
 ﻿.git
 __pycache__/
 *.pyc
-data/
 .env
+data/
 tests/

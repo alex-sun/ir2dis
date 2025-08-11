@@ -40,16 +40,18 @@ A Discord bot that tracks iRacing race results and posts them to Discord channel
 
 Create a `.env` file with the following variables:
 
-```bash
+```powershell
+Copy-Item .env.example .env
+
 # iRacing credentials (bot account recommended)
-IR_USERNAME=your_iracing_username
-IR_PASSWORD=your_iracing_password
+IRACING_EMAIL=your_iracing_email@example.com
+IRACING_PASSWORD=your_iracing_password_here
 
 # Discord bot token
 DISCORD_TOKEN=your_discord_bot_token
 
 # Polling interval in seconds (default: 120)
-POLL_INTERVAL_SEC=120
+POLL_INTERVAL_SECONDS=120
 
 # Logging level (INFO, DEBUG, etc.)
 LOG_LEVEL=INFO
@@ -70,9 +72,9 @@ python src/main.py
 
 ### Running with Docker
 
-```bash
+```powershell
 # Build and run
-docker compose -f docker-compose.dev.yml up --build
+docker compose -f .\docker-compose.dev.yml up --build
 ```
 
 ## Commands
@@ -80,7 +82,7 @@ docker compose -f docker-compose.dev.yml up --build
 - `/track <driver>` - Track a driver by name or ID
 - `/untrack <cust_id>` - Untrack a driver by ID
 - `/list_tracked` - List all tracked drivers
-- `/set_channel <channel>` - Set the channel for race results
+- `/set_channel #channel` - Set the channel for race results
 - `/test_post` - Post a test embed to the configured channel
 
 ## Database Schema
@@ -121,7 +123,7 @@ python src/test_setup.py
 
 - `src/main.py`: Main entry point
 - `src/iracing/`: iRacing API integration
-- `src/storage/`: Database operations  
+- `src/store/`: Database operations  
 - `src/discord_bot/`: Discord bot commands and embeds
 - `src/poller/`: Polling engine
 
