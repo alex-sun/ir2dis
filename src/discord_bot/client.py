@@ -14,6 +14,18 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 
+class IR2DISBot(commands.Bot):
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+
+    async def setup_hook(self) -> None:
+        """Set up the bot with commands and configuration."""
+        print(f'{self.user} has logged in!')
+        
+        # Register slash commands - moved from on_ready to setup_hook
+        await register_commands(self)
+
 def create_discord_bot(config) -> commands.Bot:
     """
     Create and configure the Discord bot.
@@ -25,15 +37,7 @@ def create_discord_bot(config) -> commands.Bot:
         commands.Bot: Configured Discord bot instance
     """
     # Create the bot with a command prefix (we'll use slash commands instead)
-    bot = commands.Bot(command_prefix='!', intents=intents)
-    
-    @bot.event
-    async def on_ready():
-        print(f'{bot.user} has logged in!')
-        
-        # Register slash commands
-        await register_commands(bot)
-    
+    bot = IR2DISBot(config, command_prefix='!', intents=intents)
     return bot
 
 async def register_commands(bot):
@@ -46,8 +50,9 @@ async def register_commands(bot):
     # Clear existing commands and register new ones
     try:
         # Create a command tree for registering commands
-        await bot.tree.clear_commands(guild=None)  # Clear global commands
-        await bot.tree.clear_commands(guild=discord.Object(id=123456789))  # Clear guild-specific if needed
+        # Remove await from these non-coroutine methods (they return None)
+        bot.tree.clear_commands(guild=None)  # Clear global commands
+        bot.tree.clear_commands(guild=discord.Object(id=123456789))  # Clear guild-specific if needed
 
         # Register all slash commands
         @bot.tree.command(name="setchannel", description="Set the results channel")
@@ -62,7 +67,7 @@ async def register_commands(bot):
                 db.execute('''
                     INSERT OR REPLACE INTO guild (guild_id, channel_id, timezone) 
                     VALUES (?, ?, ?)
-                ''', (guild_id, channel_id, config.timezone_default))
+                ''', (guild_id, channel_id, bot.config.timezone_default))
                 db.commit()
                 
                 await interaction.response.send_message(
@@ -192,7 +197,7 @@ async def register_commands(bot):
                 print(f"Error in lastrace: {e}")
                 await interaction.response.send_message("❌ Error getting last race result", ephemeral=True)
 
-        # Sync commands with Discord API
+        # Sync commands with Discord API - keep only this awaited call
         await bot.tree.sync()
         print("✅ Slash commands registered successfully")
         
