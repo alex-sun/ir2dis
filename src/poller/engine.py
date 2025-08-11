@@ -3,9 +3,9 @@ import logging
 import time
 from typing import Optional
 
-from src.iracing.api import IRacingClient
-from src.storage.repository import Repository
-from src.iracing.service import ResultService, FinishRecord
+from iracing.api import IRacingClient
+from storage.repository import Repository
+from iracing.service import ResultService, FinishRecord
 from discord.ext import commands
 
 logger = logging.getLogger(__name__)

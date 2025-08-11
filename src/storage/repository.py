@@ -21,7 +21,8 @@ class Repository:
         """Initialize all required tables if they don't exist."""
         logger.info("Initializing database tables...")
         
-        async with self._get_db() as conn:
+        conn = await self._get_db()
+        try:
             # Create tracked_drivers table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS tracked_drivers (
@@ -61,6 +62,8 @@ class Repository:
             
             await conn.commit()
             logger.info("Database tables initialized successfully")
+        finally:
+            await conn.close()
     
     async def add_tracked_driver(self, cust_id: int, display_name: str) -> None:
         """Add a new tracked driver."""

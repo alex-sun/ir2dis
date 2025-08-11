@@ -7,9 +7,9 @@ from typing import Optional, List
 import time
 
 # Import our custom modules
-from src.iracing.api import IRacingClient
-from src.iracing.service import ResultService, FinishRecord
-from src.storage.repository import Repository
+from iracing.api import IRacingClient
+from iracing.service import ResultService, FinishRecord
+from storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 

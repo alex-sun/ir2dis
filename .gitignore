@@ -3,11 +3,4 @@
 *.sqlite3
 .clinerules/
 .env
-src/config/__pycache__/*
-src/discord_bot/__pycache__/*
-src/iracing/__pycache__/*
-src/observability/__pycache__/*
-src/poller/__pycache__/*
-
-src/store/__pycache__/*
-src/utils/__pycache__/*
+*.pyc

@@ -26,16 +26,15 @@ async def main():
     logger.info("Starting iRacing to Discord bot...")
     
     # Load configuration from environment variables
-    ir_username = os.getenv('IR_USERNAME')
-    ir_password = os.getenv('IR_PASSWORD')
-    poll_interval_sec = int(os.getenv('POLL_INTERVAL_SEC', '120'))
-    log_level = os.getenv('LOG_LEVEL', 'INFO')
+    from config.loader import load_config
+    config = load_config()
+    ir_username = config.iracing_email
+    ir_password = config.iracing_password
+    poll_interval_sec = config.poll_interval_seconds
+    log_level = config.log_level
     
     # Configure logging level
     logger.setLevel(getattr(logging, log_level.upper()))
-    
-    if not ir_username or not ir_password:
-        raise ValueError("IR_USERNAME and IR_PASSWORD environment variables must be set")
     
     # Initialize database repository
     repo = Repository()
