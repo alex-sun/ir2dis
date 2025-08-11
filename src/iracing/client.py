@@ -1,178 +1,189 @@
 #!/usr/bin/env python3
 """
-iRacing API client for iRacing → Discord Auto-Results Bot.
-Handles 2-step data fetching and rate limiting.
+iRacing API client for Data API 2.0 with download link flow and retries.
 """
 
+from typing import Any, Dict, List, Optional
+import aiohttp
 import asyncio
-import json
 import time
-import requests
-from typing import Dict, Any, Optional
-from urllib.parse import urljoin
+import logging
 
-from .auth import load_cookies, save_cookies, is_cookie_valid, hash_password
-from config.loader import load_config
-from observability.logger import structured_logger
-from observability.metrics import metrics
+logger = logging.getLogger(__name__)
 
 class IRacingClient:
-    """iRacing API client with 2-step fetch pattern."""
+    def __init__(self, username: str, password: str, session: Optional[aiohttp.ClientSession] = None):
+        self.username = username
+        self.password = password
+        self.session = session or aiohttp.ClientSession()
+        self._cookie_jar = aiohttp.CookieJar()
+        # Use a semaphore to limit concurrent requests per client
+        self._semaphore = asyncio.Semaphore(4)
+        
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.session.close()
     
-    def __init__(self):
-        self.session = requests.Session()
-        self.base_url = "https://www.iracing.com"
-        self._setup_session()
-        
-    def _setup_session(self):
-        """Setup the session with default headers and cookies."""
-        config = load_config()
-        
-        # Load existing cookies
-        cookies = load_cookies()
-        if cookies and is_cookie_valid(cookies):
-            self.session.cookies.update(cookies)
-            
-        # Set user agent
-        user_agent = config.user_agent or "iRacing-Discord-Bot/1.0"
-        self.session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        })
-        
-    async def login(self) -> bool:
-        """
-        Perform login to iRacing if needed.
-        
-        Returns:
-            bool: True if login was successful or already logged in
-        """
-        config = load_config()
-        
-        # Check if we already have valid cookies
-        cookies = load_cookies()
-        if cookies and is_cookie_valid(cookies):
-            self.session.cookies.update(cookies)
-            structured_logger.info("Using existing cookies")
-            return True
-            
-        # Perform login
+    async def login(self) -> None:
+        """Authenticate and prime cookies. Reuse across calls."""
         try:
-            payload = {
-                'email': config.iracing_email.lower(),
-                'password': hash_password(config.iracing_password, config.iracing_email, config.iracing_password_hashed)
+            # First get the login page to acquire session cookies
+            async with self._semaphore:
+                async with self.session.get('https://members.iracing.com/membersite/login') as response:
+                    if response.status != 200:
+                        raise Exception(f"Failed to get login page: {response.status}")
+            
+            # Then post credentials
+            login_data = {
+                'username': self.username,
+                'password': self.password,
+                'action': 'login'
             }
             
-            response = self.session.post(
-                urljoin(self.base_url, '/auth/login'),
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 401:
-                # Login failed
-                structured_logger.error("Authentication failed")
-                metrics.increment_auth_failures()
-                return False
-                
-            elif response.status_code == 429:
-                # Rate limited
-                structured_logger.warning("Rate limited during login")
-                metrics.increment_rate_limited()
-                return False
-                
-            elif 'captcha' in response.text.lower() or response.status_code == 503:
-                # CAPTCHA required - need human intervention
-                structured_logger.error("CAPTCHA required for authentication")
-                metrics.increment_captcha_required()
-                raise Exception("CAPTCHA required. Please login manually via browser from the same IP and restart the bot.")
-                
-            # Save cookies if successful
-            save_cookies(dict(self.session.cookies))
-            
-            structured_logger.info("Successfully logged in to iRacing")
-            return True
-            
+            async with self._semaphore:
+                async with self.session.post('https://members.iracing.com/membersite/login', data=login_data) as response:
+                    if response.status != 200:
+                        raise Exception(f"Login failed: {response.status}")
+                    
+            logger.info("iRacing login successful")
         except Exception as e:
-            structured_logger.error(f"Login error: {e}")
-            return False
-            
-    async def get_json_via_link(self, endpoint: str, params: Optional[Dict] = None) -> Dict[Any, Any]:
+            logger.error(f"iRacing login failed: {e}")
+            raise
+    
+    async def _get_json_via_download(self, path: str, params: Dict[str, Any]) -> Any:
         """
-        Fetch JSON data using the 2-step pattern (GET -> GET via link).
-        
-        Args:
-            endpoint (str): API endpoint
-            params (Dict, optional): Query parameters
-            
-        Returns:
-            Dict: JSON response data
+        GET /data/<path>?... -> returns {"link": "..."}; then GET link to obtain JSON payload.
+        Retries with exponential backoff on 429/5xx.
         """
-        config = load_config()
+        max_retries = 5
+        base_delay = 1.0
+        max_delay = 60.0
         
-        # Ensure we're logged in
-        if not await self.login():
-            raise Exception("Failed to login to iRacing")
-            
+        for attempt in range(max_retries):
+            try:
+                url = f'https://members.iracing.com/data/{path}'
+                
+                async with self._semaphore:
+                    async with self.session.get(url, params=params) as response:
+                        if response.status == 429:
+                            # Rate limited - wait and retry
+                            delay = min(base_delay * (2 ** attempt), max_delay)
+                            jitter = delay * 0.1  # Add some jitter
+                            await asyncio.sleep(delay + jitter)
+                            continue
+                        elif response.status >= 500:
+                            # Server error - wait and retry
+                            delay = min(base_delay * (2 ** attempt), max_delay)
+                            jitter = delay * 0.1
+                            await asyncio.sleep(delay + jitter)
+                            continue
+                        elif response.status != 200:
+                            raise Exception(f"API request failed with status {response.status}: {await response.text()}")
+                        
+                        data = await response.json()
+                
+                # If we have a download link, fetch the actual JSON content
+                if 'link' in data and data['link']:
+                    async with self._semaphore:
+                        async with self.session.get(data['link']) as response:
+                            if response.status != 200:
+                                raise Exception(f"Download failed: {response.status}")
+                            return await response.json()
+                else:
+                    # Direct JSON response
+                    return data
+                    
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if attempt == max_retries - 1:
+                    raise
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                jitter = delay * 0.1
+                await asyncio.sleep(delay + jitter)
+                continue
+            except Exception as e:
+                logger.error(f"Error in _get_json_via_download: {e}")
+                if attempt == max_retries - 1:
+                    raise
+                # Wait before retrying for other exceptions
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                jitter = delay * 0.1
+                await asyncio.sleep(delay + jitter)
+                continue
+        
+        raise Exception("Max retries exceeded in _get_json_via_download")
+    
+    async def search_recent_sessions(
+        self, cust_id: int, start_time_epoch_s: int, end_time_epoch_s: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Query results/search for sessions involving cust_id (window ~last 48h).
+        Filter to finished 'Race' simsession results.
+        Returns list of minimal dicts containing subsession_id, series_name, track, start_time, official, etc.
+        """
         try:
-            # First step: get the link
-            url = urljoin(self.base_url, endpoint)
-            if params:
-                response = self.session.get(url, params=params, timeout=30)
-            else:
-                response = self.session.get(url, timeout=30)
-                
-            response.raise_for_status()
+            params = {
+                'cust_id': cust_id,
+                'start_time': start_time_epoch_s,
+                'end_time': end_time_epoch_s,
+                'simsession_type': 1,  # Race sessions only
+                'results_only': True,  # Only finished sessions
+                'page_size': 50  # Get up to 50 results
+            }
             
-            data = response.json()
+            data = await self._get_json_via_download('results/search', params)
             
-            # Check if we got a link
-            if 'link' in data:
-                # Second step: fetch the actual data via link
-                link_url = urljoin(self.base_url, data['link'])
-                response2 = self.session.get(link_url, timeout=30)
-                response2.raise_for_status()
-                
-                result = response2.json()
-                metrics.increment_results_fetched()
-                return result
-                
-            else:
-                # Already got the direct response
-                metrics.increment_results_fetched()
-                return data
-                
-        except requests.exceptions.RequestException as e:
-            structured_logger.error(f"HTTP request error: {e}")
-            raise
+            # Filter for race sessions that are classified (finished)
+            sessions = []
+            if 'sessions' in data:
+                for session in data['sessions']:
+                    # Only include finished Race sessions (simsession_type=1) with a result
+                    if (session.get('simsession_type') == 1 and 
+                        session.get('results') is not None and
+                        session.get('classified', False)):  # Only classified finishes
+                        sessions.append({
+                            'subsession_id': session['subsession_id'],
+                            'series_name': session.get('series_name', ''),
+                            'track_name': session.get('track_name', ''),
+                            'start_time': session.get('start_time', ''),
+                            'official': session.get('official', False)
+                        })
             
+            return sessions
         except Exception as e:
-            structured_logger.error(f"Data fetch error: {e}")
+            logger.error(f"Error in search_recent_sessions: {e}")
             raise
+    
+    async def get_subsession_results(self, subsession_id: int) -> Dict[str, Any]:
+        """
+        Fetch results/get for subsession_id (full result sheet).
+        """
+        try:
+            params = {
+                'subsession_id': subsession_id
+            }
             
-    async def get_recent_races(self, cust_id: int) -> Dict[Any, Any]:
-        """
-        Fetch recent races for a customer ID.
-        
-        Args:
-            cust_id (int): Customer ID
+            return await self._get_json_via_download('results/get', params)
+        except Exception as e:
+            logger.error(f"Error in get_subsession_results: {e}")
+            raise
+    
+    async def lookup_driver(self, query: str) -> List[Dict[str, Any]]:
+        """Use lookup/drivers?search=... -> [{cust_id, display_name, ...}]"""
+        try:
+            params = {
+                'search': query,
+                'page_size': 5
+            }
             
-        Returns:
-            Dict: Recent race data
-        """
-        endpoint = f"/data/member_results/recent/{cust_id}"
-        return await self.get_json_via_link(endpoint)
-        
-    async def get_subsession(self, subsession_id: str) -> Dict[Any, Any]:
-        """
-        Fetch details for a specific subsession.
-        
-        Args:
-            subsession_id (str): Subsession ID
+            data = await self._get_json_via_download('lookup/drivers', params)
             
-        Returns:
-            Dict: Subsession details
-        """
-        endpoint = f"/data/subsession/{subsession_id}"
-        return await self.get_json_via_link(endpoint)
+            # Return the list of drivers from the response
+            if 'drivers' in data:
+                return data['drivers']
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"Error in lookup_driver: {e}")
+            raise

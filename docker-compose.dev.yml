@@ -1,23 +1,13 @@
+version: '3.8'
+
 services:
   bot:
-    build: .
-    container_name: ir2dis-bot-dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
     volumes:
-      - .:/app
+      - ./src:/app/src
       - ./data:/app/data
-    environment:
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - IRACING_EMAIL=${IRACING_EMAIL}
-      - IRACING_PASSWORD=${IRACING_PASSWORD}
-      - IRACING_PASSWORD_HASHED=${IRACING_PASSWORD_HASHED:-false}
-      - TIMEZONE_DEFAULT=${TIMEZONE_DEFAULT:-Europe/Berlin}
-      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-120}
-      - POLL_CONCURRENCY=${POLL_CONCURRENCY:-4}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
     restart: unless-stopped
-    networks:
-      - bot-network
-
-networks:
-  bot-network:
-    driver: bridge

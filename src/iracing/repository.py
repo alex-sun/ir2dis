@@ -14,8 +14,8 @@ class Repository:
         """Add a driver to the tracking list."""
         conn = get_db()
         conn.execute('''
-            INSERT OR REPLACE INTO tracked_drivers (cust_id, display_name)
-            VALUES (?, ?)
+            INSERT OR REPLACE INTO tracked_drivers (cust_id, display_name, added_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
         ''', (cust_id, display_name))
         conn.commit()
     
@@ -43,18 +43,6 @@ class Repository:
             SELECT cust_id, display_name FROM tracked_drivers
         ''').fetchall()
         return [(row['cust_id'], row['display_name']) for row in rows]
-    
-    async def list_guilds_with_channel(self) -> List[int]:
-        """List all guild IDs that have a channel configured.
-        
-        Returns:
-            List[int]: List of guild IDs
-        """
-        conn = get_db()
-        rows = conn.execute('''
-            SELECT guild_id FROM channel_config WHERE channel_id IS NOT NULL
-        ''').fetchall()
-        return [int(row['guild_id']) for row in rows]
     
     async def get_channel_for_guild(self, guild_id: int) -> Optional[int]:
         """Get the channel ID for a guild.
@@ -96,8 +84,8 @@ class Repository:
         """
         conn = get_db()
         conn.execute('''
-            INSERT OR REPLACE INTO posted_results (subsession_id, cust_id, guild_id)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO posted_results (subsession_id, cust_id, guild_id, posted_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
         ''', (subsession_id, cust_id, str(guild_id)))
         conn.commit()
     
@@ -120,21 +108,21 @@ class Repository:
         
         return row is not None
     
-    async def get_last_poll_ts(self, cust_id: int) -> Optional[int]:
+    async def get_last_poll_ts(self, cust_id: int) -> int:
         """Get the last poll timestamp for a driver.
         
         Args:
             cust_id (int): Customer ID
             
         Returns:
-            Optional[int]: Last poll timestamp or None
+            Optional[int]: Last poll timestamp or 0 if not found
         """
         conn = get_db()
         row = conn.execute('''
             SELECT last_poll_ts FROM poll_state WHERE cust_id = ?
         ''', (cust_id,)).fetchone()
         
-        return row['last_poll_ts'] if row else None
+        return row['last_poll_ts'] if row else 0
     
     async def set_last_poll_ts(self, cust_id: int, ts: int) -> None:
         """Set the last poll timestamp for a driver.

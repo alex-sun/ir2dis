@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-iRacing → Discord Auto-Results Bot
-Main entry point for the application.
+Main entry point for the iRacing to Discord bot.
 """
 
 import asyncio
 import logging
-from config.loader import load_config
-from store.database import init_db
-from discord_bot.client import create_discord_bot
-from poller.engine import poller_engine
+import os
+from typing import Optional
 
-# Set up basic logging
+# Import our custom modules
+from src.iracing.api import IRacingClient
+from src.storage.repository import Repository
+from src.discord_bot.client import IR2DISBot
+from src.poller.engine import PollingEngine
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -19,35 +22,73 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def main():
-    """Main application entry point."""
-    logger.info("Starting iRacing → Discord Auto-Results Bot")
+    """Main entry point for the bot."""
+    logger.info("Starting iRacing to Discord bot...")
     
-    # Load configuration
-    config = load_config()
-    logger.info("Configuration loaded")
+    # Load configuration from environment variables
+    ir_username = os.getenv('IR_USERNAME')
+    ir_password = os.getenv('IR_PASSWORD')
+    poll_interval_sec = int(os.getenv('POLL_INTERVAL_SEC', '120'))
+    log_level = os.getenv('LOG_LEVEL', 'INFO')
     
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
+    # Configure logging level
+    logger.setLevel(getattr(logging, log_level.upper()))
     
-    # Create and start Discord bot first
-    bot = create_discord_bot(config)
-    logger.info("Discord bot created")
+    if not ir_username or not ir_password:
+        raise ValueError("IR_USERNAME and IR_PASSWORD environment variables must be set")
     
-    # Start the polling engine in a separate task with bot instance
-    poll_task = asyncio.create_task(poller_engine.start_polling(bot))
-    logger.info("Polling engine started")
+    # Initialize database repository
+    repo = Repository()
     
-    # Start the bot
-    await bot.start(config.discord_token)
+    # Initialize iRacing client
+    ir_client = IRacingClient(
+        username=ir_username,
+        password=ir_password
+    )
     
-if __name__ == "__main__":
+    # Initialize Discord bot
+    bot = IR2DISBot(repository=repo, iracing_client=ir_client)
+    
+    # Initialize polling engine
+    poller = PollingEngine(
+        repository=repo,
+        iracing_client=ir_client,
+        discord_bot=bot,
+        interval=poll_interval_sec
+    )
+    
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-        # Stop polling engine
-        asyncio.create_task(poller_engine.stop_polling())
+        # Initialize database tables
+        await repo.initialize_tables()
+        
+        # Login to iRacing
+        logger.info("Logging into iRacing...")
+        await ir_client.login()
+        logger.info("iRacing login successful")
+        
+        # Start the polling engine in the background
+        logger.info(f"Starting polling engine with interval {poll_interval_sec} seconds")
+        poller_task = asyncio.create_task(poller.start())
+        
+        # Run the Discord bot
+        discord_token = os.getenv('DISCORD_TOKEN')
+        if not discord_token:
+            raise ValueError("DISCORD_TOKEN environment variable must be set")
+            
+        logger.info("Starting Discord bot...")
+        await bot.run(discord_token)
+        
     except Exception as e:
-        logger.error(f"Error running bot: {e}")
+        logger.error(f"Error in main: {e}")
         raise
+    finally:
+        # Cleanup tasks
+        if 'poller_task' in locals():
+            poller_task.cancel()
+            try:
+                await poller_task
+            except asyncio.CancelledError:
+                pass
+
+if __name__ == "__main__":
+    asyncio.run(main())

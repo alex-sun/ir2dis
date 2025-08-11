@@ -1,105 +1,64 @@
-# iRacing → Discord Auto-Results Bot
+# iRacing to Discord Bot (ir2dis)
 
-A Discord bot that automatically posts iRacing race results for tracked drivers into a configured channel.
+A Discord bot that tracks iRacing race results and posts them to Discord channels.
 
 ## Features
 
-- Automatically posts race results to Discord
-- Slash commands to manage tracking
-- Polling engine with deduplication and backoff
-- Cookie persistence to avoid reCAPTCHA
-- Dockerized deployment
-- Structured logging and metrics
-- Support for SQLite, MariaDB, and PostgreSQL databases
-
-## Requirements
-
-- Python 3.9+
-- Docker (for containerized deployment)
-
-## Quick Start
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Run with Docker**
-   ```bash
-   docker-compose up -d
-   ```
-
-## Development Mode
-
-For development, you can run the bot with volume mounting to enable hot-reloading:
-
-```bash
-docker-compose -f docker-compose.dev.yml up -d
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DISCORD_TOKEN` | Discord bot token | - |
-| `IRACING_EMAIL` | iRacing email | - |
-| `IRACING_PASSWORD` | iRacing password | - |
-| `IRACING_PASSWORD_HASHED` | If password is already hashed | `false` |
-| `TIMEZONE_DEFAULT` | Default timezone for guilds | `Europe/Berlin` |
-| `POLL_INTERVAL_SECONDS` | Polling interval in seconds | `120` |
-| `POLL_CONCURRENCY` | Max concurrent requests to iRacing | `4` |
-| `SQLITE_PATH` | Path to SQLite database file | `data/bot.db` |
-| `COOKIES_PATH` | Path to cookie file | `data/cookies.json` |
-| `LOG_LEVEL` | Logging level | `info` |
-
-### Slash Commands
-
-- `/setchannel #channel` - Set the results channel
-- `/track <cust_id>` - Track a driver
-- `/untrack <cust_id>` - Stop tracking a driver
-- `/list` - List tracked drivers
-- `/lastrace <cust_id>` - Get last race result for a driver
+- Tracks drivers by iRacing ID or name
+- Polls iRacing Data API for finished race sessions
+- Posts rich Discord embeds with race results
+- Deduplicates posts across restarts
+- Configurable via environment variables
+- Resilient with retry logic and rate limiting
 
 ## Architecture
 
-The bot follows a modular architecture:
-
 ```
-src/
-├── discord/     # Discord bot and command handling
-├── iracing/     # iRacing API integration
-├── poller/      # Polling engine and deduplication logic
-├── store/       # Database layer (SQLite)
-├── config/      # Configuration management
-├── observability/ # Logging and metrics
-└── utils/       # Utility functions
+┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Discord    │    │   iRacing    │    │   Database   │
+│   Bot       │───▶│   API        │───▶│              │
+└─────────────┘    └──────────────┘    └──────────────┘
+       │                   │                │
+       │                   │                │
+       ▼                   ▼                ▼
+┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Poller     │    │   Service    │    │ Repository   │
+│             │    │              │    │              │
+└─────────────┘    └──────────────┘    └──────────────┘
 ```
 
-## Data Model
+## Setup
 
-The bot uses SQLite with the following tables:
+### Prerequisites
 
-- `guild` - Discord guild settings
-- `tracked_driver` - Drivers being tracked per guild
-- `last_seen` - Last subsession seen for each driver
-- `post_history` - Records of posts to prevent duplicates
-- `auth_state` - Authentication cookies
+- Python 3.11+
+- Docker (for running in containerized environment)
+- iRacing account with API access
+- Discord bot token
 
-## Deployment
+### Environment Variables
 
-### Docker
+Create a `.env` file with the following variables:
 
-The bot is designed to be deployed with Docker. The `Dockerfile` and `docker-compose.yml` are provided for easy deployment.
+```bash
+# iRacing credentials (bot account recommended)
+IR_USERNAME=your_iracing_username
+IR_PASSWORD=your_iracing_password
 
-### Manual Installation
+# Discord bot token
+DISCORD_TOKEN=your_discord_bot_token
+
+# Polling interval in seconds (default: 120)
+POLL_INTERVAL_SEC=120
+
+# Logging level (INFO, DEBUG, etc.)
+LOG_LEVEL=INFO
+
+# Optional: Specific guild for development
+DISCORD_GUILD_ID=your_guild_id
+```
+
+### Running Locally
 
 ```bash
 # Install dependencies
@@ -109,56 +68,62 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
-## Security
+### Running with Docker
 
-- Passwords are hashed using iRacing's method
-- Cookies are persisted to avoid repeated logins
-- Secrets are not logged or stored in plaintext in logs
-- Environment variables should be used for sensitive data
+```bash
+# Build and run
+docker compose -f docker-compose.dev.yml up --build
+```
 
-## Troubleshooting
+## Commands
 
-### ReCAPTCHA Issues
+- `/track <driver>` - Track a driver by name or ID
+- `/untrack <cust_id>` - Untrack a driver by ID
+- `/list_tracked` - List all tracked drivers
+- `/set_channel <channel>` - Set the channel for race results
+- `/test_post` - Post a test embed to the configured channel
 
-If you encounter reCAPTCHA challenges:
+## Database Schema
 
-1. Perform a one-time login via browser from the same egress IP as your bot
-2. Restart the bot - it will use the saved cookies
+The bot uses SQLite with the following tables:
 
-### Database Issues
+1. `tracked_drivers`: Stores tracked driver information
+2. `channel_config`: Maps guilds to result channels  
+3. `posted_results`: Tracks which results have been posted (deduplication)
+4. `poll_state`: Stores polling timestamps for drivers
 
-The database file is stored in `data/bot.db`. If issues occur, you can delete this file to start fresh (note: this will reset all tracking).
+## Configuration
+
+### Docker Configuration
+
+Add environment variables to your `docker-compose.dev.yml`:
+
+```yaml
+services:
+  bot:
+    build: .
+    env_file:
+      - .env
+    # ... other config
+```
 
 ## Development
 
-To contribute:
+### Testing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Follow the [contribution guidelines](CONTRIBUTING.md) for commit messages
-5. Submit a pull request
+Run tests with pytest:
 
-## Running Tests
+```bash
+python src/test_setup.py
+```
 
-The project includes a test setup script that verifies the project structure and imports all modules correctly. To run tests using Docker on Windows with PowerShell:
+### Code Structure
 
-1. Make sure Docker Desktop is installed and running
-2. Create a `.env` file by copying the example:
-   ```powershell
-   Copy-Item .env.example .env
-   ```
-3. Edit the `.env` file to add your Discord bot token and iRacing credentials
-4. Run the tests using:
-   ```powershell
-   docker compose run bot python src/test_setup.py
-   ```
-
-**Note**: Some tests may fail due to missing environment variables or Discord import issues, but the core functionality tests should pass.
-
-## Technical Specification
-
-For detailed implementation specifications and system architecture, please refer to the [technical specification document](TECHNICAL_SPEC.md).
+- `src/main.py`: Main entry point
+- `src/iracing/`: iRacing API integration
+- `src/storage/`: Database operations  
+- `src/discord_bot/`: Discord bot commands and embeds
+- `src/poller/`: Polling engine
 
 ## License
 
