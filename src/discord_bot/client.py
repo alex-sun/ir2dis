@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from config.loader import load_config
 from store.database import get_db
+import os
 
 # Create the bot with command prefix and intents
 intents = discord.Intents.default()
@@ -21,8 +22,6 @@ class IR2DISBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Set up the bot with commands and configuration."""
-        print(f'{self.user} has logged in!')
-        
         # Register slash commands - moved from on_ready to setup_hook
         await register_commands(self)
 
@@ -52,7 +51,10 @@ async def register_commands(bot):
         # Create a command tree for registering commands
         # Remove await from these non-coroutine methods (they return None)
         bot.tree.clear_commands(guild=None)  # Clear global commands
-        bot.tree.clear_commands(guild=discord.Object(id=123456789))  # Clear guild-specific if needed
+        # Use environment variable for guild ID or remove per-guild clearing
+        guild_id = os.getenv("DISCORD_GUILD_ID")
+        if guild_id:
+            bot.tree.clear_commands(guild=discord.Object(id=int(guild_id)))  # Clear guild-specific if needed
 
         # Register all slash commands
         @bot.tree.command(name="setchannel", description="Set the results channel")
