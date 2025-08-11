@@ -69,13 +69,13 @@ async def main():
         logger.info(f"Starting polling engine with interval {poll_interval_sec} seconds")
         poller_task = asyncio.create_task(poller.start())
         
-        # Run the Discord bot
+        # Run the Discord bot using start() instead of run() to avoid nested event loops
         discord_token = os.getenv('DISCORD_TOKEN')
         if not discord_token:
             raise ValueError("DISCORD_TOKEN environment variable must be set")
             
         logger.info("Starting Discord bot...")
-        await bot.run(discord_token)
+        await bot.start(discord_token)
         
     except Exception as e:
         logger.error(f"Error in main: {e}")
@@ -88,6 +88,19 @@ async def main():
                 await poller_task
             except asyncio.CancelledError:
                 pass
+        # Close the iRacing client session
+        await ir_client.close()
 
+# Run the main function using the event loop that's already running (don't use asyncio.run)
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Get or create an event loop and run the main function
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()

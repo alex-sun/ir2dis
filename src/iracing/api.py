@@ -1,54 +1,56 @@
+import base64
+import hashlib
 from typing import Any, Dict, List, Optional
 import aiohttp, asyncio, time
 import logging
 
 logger = logging.getLogger(__name__)
 
+def _hash_password(raw_password: str, email: str) -> str:
+    """Hash password according to iRacing requirements: Base64(SHA256(password + lower(email)))"""
+    salted = (raw_password or "") + (email or "").strip().lower()
+    digest = hashlib.sha256(salted.encode("utf-8")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
 class IRacingClient:
+    AUTH_URL = "https://members-ng.iracing.com/auth"
+    BASE_URL = "https://members-ng.iracing.com"
+    
     def __init__(self, username: str, password: str, session: Optional[aiohttp.ClientSession] = None):
         self.username = username
         self.password = password
         self.session = session or aiohttp.ClientSession()
-        self._cookie_jar = aiohttp.CookieJar()
         # Use semaphore to limit concurrent requests per client
         self._semaphore = asyncio.Semaphore(4)
         
+    async def close(self) -> None:
+        """Close the HTTP session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+        
     async def login(self) -> None:
-        """Authenticate and prime cookies. Reuse across calls."""
+        """Authenticate with iRacing using the new salted+hashed password flow."""
         logger.info("Starting iRacing authentication...")
         
-        # First, get the login page to extract any necessary tokens
-        try:
-            async with self.session.get(
-                "https://members.iracing.com/membership/login",
-                headers={"User-Agent": "IR2DIS Bot"},
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status != 200:
-                    raise Exception(f"Failed to get login page: {response.status}")
-                
-                # Extract any CSRF tokens or other required data from the login page
-                # For now, we'll proceed with direct authentication
-                
-        except Exception as e:
-            logger.warning(f"Could not fetch login page for token extraction: {e}")
+        # Use the new auth endpoint with salted+hashed password
+        payload = {
+            "email": self.username,
+            "password": _hash_password(self.password, self.username),
+        }
         
-        # Perform actual login using form submission
         try:
             async with self.session.post(
-                "https://members.iracing.com/membership/authorize",
-                data={
-                    "username": self.username,
-                    "password": self.password,
-                    "rememberme": "true"
-                },
+                self.AUTH_URL,
+                json=payload,
+                allow_redirects=False,
                 headers={"User-Agent": "IR2DIS Bot"},
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as response:
                 if response.status != 200:
-                    raise Exception(f"Login failed with status {response.status}")
+                    txt = await response.text()
+                    raise Exception(f"Auth failed: {response.status} {txt[:200]}")
                 
-                # Check if login was successful by looking for a redirect or session cookie
+                # Cookies are automatically stored in the session and will be reused
                 logger.info("iRacing authentication completed successfully")
                 
         except Exception as e:
