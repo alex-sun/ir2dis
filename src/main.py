@@ -46,8 +46,10 @@ async def main():
         password=ir_password
     )
     
-    # Initialize Discord bot
-    bot = IR2DISBot(repository=repo, iracing_client=ir_client)
+    # Initialize Discord bot with proper intents
+    intents = discord.Intents.default()
+    intents.guilds = True
+    bot = IR2DISBot(repository=repo, iracing_client=ir_client, intents=intents)
     
     # Initialize polling engine
     poller = PollingEngine(
