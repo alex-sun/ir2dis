@@ -9,10 +9,10 @@ import os
 from typing import Optional
 
 # Import our custom modules
-from src.iracing.api import IRacingClient
-from src.storage.repository import Repository
-from src.discord_bot.client import IR2DISBot
-from src.poller.engine import PollingEngine
+from iracing.api import IRacingClient
+from storage.repository import Repository
+from discord_bot.client import IR2DISBot
+from poller.engine import PollingEngine
 
 # Configure logging
 logging.basicConfig(
