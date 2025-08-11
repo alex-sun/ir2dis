@@ -51,13 +51,26 @@ def test_database():
         print(f"✗ Database access failed: {e}")
         return False
 
+def test_new_modules():
+    """Test new iRacing modules can be imported."""
+    try:
+        from iracing.api import IRacingClient
+        from iracing.service import ResultService, FinishRecord
+        from iracing.repository import Repository
+        print("✓ New iRacing modules imported successfully")
+        return True
+    except Exception as e:
+        print(f"✗ New module imports failed: {e}")
+        return False
+
 if __name__ == "__main__":
     print("Testing project setup...")
     
     tests = [
         test_imports,
         test_config_loading,
-        test_database
+        test_database,
+        test_new_modules
     ]
     
     passed = 0

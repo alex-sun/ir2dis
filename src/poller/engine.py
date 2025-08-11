@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polling engine for iRacing → Discord Auto-Results Bot.
-Handles polling cycles, deduplication, and posting logic.
+Handles polling cycles, deduplication, and posting logic using new architecture.
 """
 
 import asyncio
@@ -10,26 +10,41 @@ from typing import List, Dict, Any
 from datetime import datetime
 
 from store.database import get_db
-from iracing.client import IRacingClient
-from discord_bot.client import create_discord_bot
+from iracing.api import IRacingClient
+from iracing.service import ResultService
+from iracing.repository import Repository
 from observability.logger import structured_logger
 from observability.metrics import metrics
 from config.loader import load_config
+import discord
 
 class PollerEngine:
-    """Main polling engine for the bot."""
+    """Main polling engine for the bot using new iRacing integration architecture."""
     
     def __init__(self):
-        self.iracing_client = IRacingClient()
         self.running = False
+        self.semaphore = asyncio.Semaphore(4)  # Limit concurrent API calls
+        self.ir_client = None
+        self.result_service = None
+        self.repo = None
         
     async def start_polling(self):
         """Start the polling loop."""
         config = load_config()
         self.running = True
-        
         structured_logger.info("Starting polling loop", 
                               poll_interval=config.poll_interval_seconds)
+        
+        # Initialize clients and services
+        try:
+            from config.loader import load_config
+            config = load_config()
+            self.ir_client = IRacingClient(config.iracing_email, config.iracing_password)
+            self.repo = Repository()
+            self.result_service = ResultService(self.ir_client, self.repo)
+        except Exception as e:
+            structured_logger.error(f"Failed to initialize clients: {e}")
+            return
         
         while self.running:
             try:
@@ -50,132 +65,52 @@ class PollerEngine:
         structured_logger.info("Polling loop stopped")
         
     async def _poll_cycle(self):
-        """Execute a single polling cycle."""
+        """Execute a single polling cycle using new architecture."""
         structured_logger.info("Starting poll cycle")
         
-        # Get all guilds with configured channels
-        db = get_db()
-        guilds = db.execute('''
-            SELECT guild_id, channel_id, timezone 
-            FROM guild 
-            WHERE channel_id IS NOT NULL
-        ''').fetchall()
-        
-        for row in guilds:
-            guild_id = row['guild_id']
-            channel_id = row['channel_id']
-            timezone = row['timezone']
-            
-            try:
-                await self._process_guild(guild_id, channel_id, timezone)
-            except Exception as e:
-                structured_logger.error(f"Error processing guild {guild_id}: {e}")
-                
-        structured_logger.info("Poll cycle completed")
-    
-    async def _process_guild(self, guild_id: str, channel_id: str, timezone: str):
-        """Process a single guild."""
-        db = get_db()
-        
-        # Get tracked drivers for this guild
-        tracked_drivers = db.execute('''
-            SELECT cust_id, display_name 
-            FROM tracked_driver 
-            WHERE guild_id = ? AND active = 1
-        ''', (guild_id,)).fetchall()
-        
-        for driver_row in tracked_drivers:
-            cust_id = driver_row['cust_id']
-            
-            try:
-                await self._process_driver(guild_id, channel_id, timezone, cust_id)
-            except Exception as e:
-                structured_logger.error(f"Error processing driver {cust_id} for guild {guild_id}: {e}")
-    
-    async def _process_driver(self, guild_id: str, channel_id: str, timezone: str, cust_id: int):
-        """Process a single driver."""
-        db = get_db()
-        
-        # Get last seen subsession for this driver
-        last_seen = db.execute('''
-            SELECT last_subsession_id 
-            FROM last_seen 
-            WHERE guild_id = ? AND cust_id = ?
-        ''', (guild_id, cust_id)).fetchone()
-        
-        # Get recent races from iRacing
         try:
-            races_data = await self.iracing_client.get_recent_races(cust_id)
+            # Get all guilds with configured channels (new method)
+            guild_ids = await self.repo.list_guilds_with_channel()
             
-            if not races_data or 'results' not in races_data:
+            if not guild_ids:
+                structured_logger.warning("No guilds with configured channels found")
                 return
                 
-            # Process each race result
-            for race in races_data['results']:
-                subsession_id = str(race['subsession_id'])
-                
-                # Check if this race was already posted
-                existing_post = db.execute('''
-                    SELECT * FROM post_history 
-                    WHERE guild_id = ? AND subsession_id = ?
-                ''', (guild_id, subsession_id)).fetchone()
-                
-                if existing_post:
-                    metrics.increment_dedupe_skips()
-                    continue
-                    
-                # Check if this is a new race (not seen before)
-                if last_seen and last_seen['last_subsession_id'] == subsession_id:
-                    continue
-                    
-                # Fetch detailed subsession data
+            for guild_id in guild_ids:
                 try:
-                    subsession_data = await self.iracing_client.get_subsession(subsession_id)
-                    
-                    # Validate that it's an official result (not warmup/practice)
-                    if not self._is_official_result(subsession_data):
-                        continue
-                        
-                    # Build and post the message
-                    # Note: This is a placeholder - actual implementation would need Discord integration
-                    structured_logger.info("New race result found",
-                                          guild_id=guild_id,
-                                          cust_id=cust_id,
-                                          subsession_id=subsession_id)
-                    
-                    # Record this as posted (in a real implementation, we'd post to Discord here)
-                    db.execute('''
-                        INSERT OR REPLACE INTO post_history 
-                        (guild_id, subsession_id, message_id, posted_at) 
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ''', (guild_id, subsession_id, "placeholder"))
-                    
-                    # Update last seen
-                    db.execute('''
-                        INSERT OR REPLACE INTO last_seen 
-                        (guild_id, cust_id, last_subsession_id, last_finish_at) 
-                        VALUES (?, ?, ?, ?)
-                    ''', (guild_id, cust_id, subsession_id, datetime.now()))
-                    
-                    metrics.increment_posts_published()
-                    
+                    await self._process_guild(guild_id)
                 except Exception as e:
-                    structured_logger.error(f"Error fetching subsession details: {e}")
-                    continue
+                    structured_logger.error(f"Error processing guild {guild_id}: {e}")
                     
         except Exception as e:
-            structured_logger.error(f"Error fetching recent races for driver {cust_id}: {e}")
+            structured_logger.error(f"Error in poll cycle: {e}")
+            
+        structured_logger.info("Poll cycle completed")
     
-    def _is_official_result(self, subsession_data: Dict) -> bool:
-        """Check if a subsession is an official result (not warmup/practice)."""
-        # This is a simplified check - in practice we'd look at the session type
-        # and possibly other criteria to determine if it's an official result
-        
-        # In real implementation, this would check things like:
-        # - Session type (official race vs practice/warmup)
-        # - Number of laps completed
-        # - If it's a final result
-        return True  # Simplified for now
+    async def _process_guild(self, guild_id: int):
+        """Process a single guild using new architecture."""
+        # Get channel for this guild (new method)
+        channel_id = await self.repo.get_channel_for_guild(guild_id)
+        if not channel_id:
+            structured_logger.warning(f"No channel configured for guild {guild_id}")
+            return
+            
+        try:
+            # Find new finishes for tracked drivers in this guild
+            new_finishes = await self.result_service.find_new_finishes_for_tracked()
+            
+            if not new_finishes:
+                structured_logger.info("No new finishes found")
+                return
+                
+            # Process and post results (this would be done by Discord integration)
+            posted_count = await self.result_service.process_and_post_results(new_finishes)
+            metrics.increment_posts_published(posted_count)
+            
+            structured_logger.info(f"Posted {posted_count} new results for guild {guild_id}")
+            
+        except Exception as e:
+            structured_logger.error(f"Error processing guild {guild_id}: {e}")
 
 # Global instance
 poller_engine = PollerEngine()

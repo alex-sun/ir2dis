@@ -33,7 +33,46 @@ async def init_db() -> None:
     """
     conn = get_db()
     
-    # Create tables
+    # Create tables for iRacing integration (as per task requirements)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS tracked_drivers (
+            cust_id INTEGER PRIMARY KEY,
+            display_name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS channel_config (
+            guild_id TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL,
+            mode TEXT DEFAULT 'production'
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS posted_results (
+            subsession_id INTEGER,
+            cust_id INTEGER,
+            guild_id TEXT,
+            posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (subsession_id, cust_id, guild_id)
+        )
+    ''')
+    
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS poll_state (
+            cust_id INTEGER PRIMARY KEY,
+            last_poll_ts INTEGER
+        )
+    ''')
+    
+    # Create indices for better performance
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_posted_results_subsession ON posted_results(subsession_id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_posted_results_cust ON posted_results(cust_id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_poll_state_cust ON poll_state(cust_id)')
+    
+    # Create indices for existing tables (maintaining backward compatibility)
     conn.execute('''
         CREATE TABLE IF NOT EXISTS guild (
             guild_id TEXT PRIMARY KEY,
@@ -87,7 +126,7 @@ async def init_db() -> None:
         )
     ''')
     
-    # Create indices
+    # Create indices for existing tables (maintaining backward compatibility)
     conn.execute('CREATE INDEX IF NOT EXISTS idx_tracked_driver_guild ON tracked_driver(guild_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_post_history_subsession ON post_history(subsession_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_last_seen_guild_cust ON last_seen(guild_id, cust_id)')
