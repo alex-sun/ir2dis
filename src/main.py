@@ -8,7 +8,7 @@ import asyncio
 import logging
 from config.loader import load_config
 from store.database import init_db
-from discord.client import create_discord_bot
+from discord_bot.client import create_discord_bot
 from poller.engine import poller_engine
 
 # Set up basic logging

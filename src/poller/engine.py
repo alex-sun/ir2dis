@@ -11,7 +11,7 @@ from datetime import datetime
 
 from store.database import get_db
 from iracing.client import IRacingClient
-from discord.client import create_discord_bot
+from discord_bot.client import create_discord_bot
 from observability.logger import structured_logger
 from observability.metrics import metrics
 from config.loader import load_config
