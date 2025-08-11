@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 from typing import Optional
+import discord
 
 # Import our custom modules
 from iracing.api import IRacingClient

@@ -6,7 +6,9 @@ services:
     env_file:
       - .env
     environment:
+      # Allow overriding via host env; default to example/fallback
       - PYTHONPATH=/app/src
+      - DEV_GUILD_ID=${DEV_GUILD_ID:-421260739055976468}
     volumes:
       - ./src:/app/src
       - ./data:/app/data

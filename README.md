@@ -130,3 +130,17 @@ python src/test_setup.py
 ## License
 
 MIT
+
+### Instant Slash Commands in Dev
+Discord can take up to ~1 hour to propagate **global** slash commands. To avoid "Unknown Integration" during development, this repo syncs commands to a specific guild on startup:
+
+1) Set `DEV_GUILD_ID` in `.env` (or rely on the fallback `421260739055976468`).
+2) Start the dev stack:
+   ```bash
+   docker compose -f docker-compose.dev.yml run --rm bot python src/main.py
+   ```
+3) Check logs for:
+   - `Synced N GLOBAL commands`
+   - `Synced N commands to GUILD <id>`
+
+You can still invite the bot to **any** server. Global commands remain enabled; the guild sync only makes them appear instantly in the specified guild.

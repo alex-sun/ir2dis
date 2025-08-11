@@ -1,8 +1,9 @@
+import os
+import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
-import logging
 from typing import Optional, List
 import time
 
@@ -29,10 +30,49 @@ class IR2DISBot(commands.Bot):
         """Setup hook for Discord bot - sync commands."""
         logger.info("Setting up bot hooks...")
         
-        # Sync application commands
-        await self.tree.sync()
-        logger.info("Application commands synced")
-        
+        # 1) Global sync (may take time to propagate across Discord)
+        try:
+            global_synced = await self.tree.sync()
+            logger.info("Synced %d GLOBAL commands", len(global_synced))
+        except Exception as e:
+            logger.exception("Global command sync failed: %r", e)
+
+        # 2) Instant per-guild sync for development / known guilds
+        dev_guild_id = os.getenv("DEV_GUILD_ID", "").strip()
+        if not dev_guild_id:
+            # Fallback to your known dev guild for instant visibility
+            dev_guild_id = "421260739055976468"
+        try:
+            guild = discord.Object(id=int(dev_guild_id))
+            # Copy the global set to the guild and sync for immediate availability
+            self.tree.copy_global_to(guild=guild)
+            guild_synced = await self.tree.sync(guild=guild)
+            logger.info("Synced %d commands to GUILD %s", len(guild_synced), dev_guild_id)
+        except Exception as e:
+            logger.exception("Guild command sync failed for %s: %r", dev_guild_id, e)
+
+    async def on_ready(self):
+        try:
+            app_info = await self.application_info()
+            logger.info(
+                "Bot ready: user=%s (%s) | application_id=%s | guilds=%d",
+                self.user, getattr(self.user, "id", None), app_info.id, len(self.guilds)
+            )
+        except Exception as e:
+            logger.exception("on_ready logging failed: %r", e)
+
+    # Optional: centralized error reporting for app commands
+    @commands.Cog.listener()
+    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
+        logger.exception("App command error: %r", error)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ Command failed.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Command failed.", ephemeral=True)
+        except Exception:
+            pass
+
     async def post_finish_embed(self, record: FinishRecord, channel_id: int) -> None:
         """Post a finish embed to Discord."""
         try:

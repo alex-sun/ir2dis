@@ -146,6 +146,7 @@ src/
 - `DISCORD_TOKEN`: Discord bot token
 - `POLL_INTERVAL_SEC`: Polling interval (default: 120)
 - `LOG_LEVEL`: Logging verbosity (default: INFO)
+- `DEV_GUILD_ID`: Discord guild ID for instant command sync during development
 
 ### Docker Integration
 - Configured via `docker-compose.dev.yml`
