@@ -30,13 +30,13 @@ async def main():
     await init_db()
     logger.info("Database initialized")
     
-    # Start the polling engine in a separate task
-    poll_task = asyncio.create_task(poller_engine.start_polling())
-    logger.info("Polling engine started")
-    
-    # Create and start Discord bot
+    # Create and start Discord bot first
     bot = create_discord_bot(config)
     logger.info("Discord bot created")
+    
+    # Start the polling engine in a separate task with bot instance
+    poll_task = asyncio.create_task(poller_engine.start_polling(bot))
+    logger.info("Polling engine started")
     
     # Start the bot
     await bot.start(config.discord_token)

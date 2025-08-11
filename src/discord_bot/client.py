@@ -5,8 +5,6 @@ Discord bot client for iRacing → Discord Auto-Results Bot.
 
 import discord
 from discord.ext import commands
-from config.loader import load_config
-from store.database import get_db
 from iracing.api import IRacingClient
 from iracing.repository import Repository
 from iracing.service import FinishRecord
@@ -29,9 +27,7 @@ class IR2DISBot(commands.Bot):
         """Set up the bot with commands and configuration."""
         # Initialize clients for use in commands
         try:
-            from config.loader import load_config
-            config = load_config()
-            self.ir_client = IRacingClient(config.iracing_email, config.iracing_password)
+            self.ir_client = IRacingClient(self.config.iracing_username, self.config.iracing_password)
             self.repo = Repository()
         except Exception as e:
             print(f"Failed to initialize iRacing client: {e}")
@@ -63,15 +59,14 @@ async def register_commands(bot):
     # Clear existing commands and register new ones
     try:
         # Create a command tree for registering commands
-        # Remove await from these non-coroutine methods (they return None)
         bot.tree.clear_commands(guild=None)  # Clear global commands
-        # Use environment variable for guild ID or remove per-guild clearing
+        # Use environment variable for guild ID if set, otherwise use None (global)
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
-            bot.tree.clear_commands(guild=discord.Object(id=int(guild_id)))  # Clear guild-specific if needed
+            bot.tree.clear_commands(guild=discord.Object(id=int(guild_id)))  # Clear guild-specific commands
 
         # Register all slash commands
-        @bot.tree.command(name="setchannel", description="Set the results channel")
+        @bot.tree.command(name="set_channel", description="Set the results channel for this server")
         async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
             """Set the results channel for this server."""
             try:
@@ -84,7 +79,7 @@ async def register_commands(bot):
                 print(f"Error in set_channel: {e}")
                 await interaction.response.send_message("❌ Error setting channel", ephemeral=True)
 
-        @bot.tree.command(name="track", description="Track a driver")
+        @bot.tree.command(name="track", description="Track a driver by name or ID")
         async def track_driver(interaction: discord.Interaction, driver: str):
             """Track a driver by customer ID or name."""
             try:
@@ -92,7 +87,7 @@ async def register_commands(bot):
                 channel_id = await bot.repo.get_channel_for_guild(interaction.guild.id)
                 if not channel_id:
                     await interaction.response.send_message(
-                        "❌ Please set a results channel first using `/setchannel`", 
+                        "❌ Please set a results channel first using `/set_channel`", 
                         ephemeral=True
                     )
                     return
@@ -120,7 +115,7 @@ async def register_commands(bot):
                         cust_id = search_results[0]['cust_id']
                         display_name = search_results[0]['display_name']
 
-                # Check if already tracked
+                # Check if already tracked (improved approach)
                 existing_tracked = await bot.repo.list_tracked()
                 if any(cust_id == cust_id_val for cust_id_val, _ in existing_tracked):
                     await interaction.response.send_message(
@@ -185,7 +180,7 @@ async def register_commands(bot):
                 channel_id = await bot.repo.get_channel_for_guild(interaction.guild.id)
                 if not channel_id:
                     await interaction.response.send_message(
-                        "❌ No results channel set. Please use `/setchannel` first.", 
+                        "❌ No results channel set. Please use `/set_channel` first.", 
                         ephemeral=True
                     )
                     return

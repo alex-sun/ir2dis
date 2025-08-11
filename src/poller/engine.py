@@ -27,13 +27,15 @@ class PollerEngine:
         self.ir_client = None
         self.result_service = None
         self.repo = None
+        self.bot = None
         
-    async def start_polling(self):
+    async def start_polling(self, bot_instance=None):
         """Start the polling loop."""
         config = load_config()
         self.running = True
         structured_logger.info("Starting polling loop", 
                               poll_interval=config.poll_interval_seconds)
+        self.bot = bot_instance
         
         # Initialize clients and services
         try:
@@ -69,48 +71,25 @@ class PollerEngine:
         structured_logger.info("Starting poll cycle")
         
         try:
-            # Get all guilds with configured channels (new method)
-            guild_ids = await self.repo.list_guilds_with_channel()
-            
-            if not guild_ids:
-                structured_logger.warning("No guilds with configured channels found")
-                return
-                
-            for guild_id in guild_ids:
-                try:
-                    await self._process_guild(guild_id)
-                except Exception as e:
-                    structured_logger.error(f"Error processing guild {guild_id}: {e}")
-                    
-        except Exception as e:
-            structured_logger.error(f"Error in poll cycle: {e}")
-            
-        structured_logger.info("Poll cycle completed")
-    
-    async def _process_guild(self, guild_id: int):
-        """Process a single guild using new architecture."""
-        # Get channel for this guild (new method)
-        channel_id = await self.repo.get_channel_for_guild(guild_id)
-        if not channel_id:
-            structured_logger.warning(f"No channel configured for guild {guild_id}")
-            return
-            
-        try:
-            # Find new finishes for tracked drivers in this guild
+            # Find new finishes for all tracked drivers
             new_finishes = await self.result_service.find_new_finishes_for_tracked()
             
             if not new_finishes:
                 structured_logger.info("No new finishes found")
                 return
                 
-            # Process and post results (this would be done by Discord integration)
-            posted_count = await self.result_service.process_and_post_results(new_finishes)
-            metrics.increment_posts_published(posted_count)
-            
-            structured_logger.info(f"Posted {posted_count} new results for guild {guild_id}")
-            
+            # Process and post results to Discord channels
+            if self.bot:
+                posted_count = await self.result_service.process_and_post_results(new_finishes, self.bot)
+                metrics.increment_posts_published(posted_count)
+                structured_logger.info(f"Posted {posted_count} new results")
+            else:
+                structured_logger.warning("No bot instance available for posting")
+                
         except Exception as e:
-            structured_logger.error(f"Error processing guild {guild_id}: {e}")
+            structured_logger.error(f"Error in poll cycle: {e}")
+            
+        structured_logger.info("Poll cycle completed")
 
 # Global instance
 poller_engine = PollerEngine()
