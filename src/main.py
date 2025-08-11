@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main entry point for the iRacing to Discord bot.
-"""
-
 import asyncio
 import logging
 import os
@@ -14,6 +9,7 @@ from iracing.api import IRacingClient
 from storage.repository import Repository
 from discord_bot.client import IR2DISBot
 from poller.engine import PollingEngine
+from iracing.service import ResultService
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +46,9 @@ async def main():
     intents = discord.Intents.default()
     intents.guilds = True
     bot = IR2DISBot(repository=repo, iracing_client=ir_client, intents=intents)
+    
+    # Initialize ResultService
+    result_service = ResultService(ir_client, repo)
     
     # Initialize polling engine
     poller = PollingEngine(

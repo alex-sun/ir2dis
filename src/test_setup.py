@@ -57,10 +57,21 @@ def test_new_modules():
         from iracing.api import IRacingClient
         from iracing.service import ResultService, FinishRecord
         from iracing.repository import Repository
+        from storage.repository import Repository as StorageRepository
         print("✓ New iRacing modules imported successfully")
         return True
     except Exception as e:
         print(f"✗ New module imports failed: {e}")
+        return False
+
+def test_command_modules():
+    """Test that command modules can be imported."""
+    try:
+        from discord_bot.commands import ping, track, untrack, list_tracked, set_channel, test_post
+        print("✓ Command modules imported successfully")
+        return True
+    except Exception as e:
+        print(f"✗ Command module imports failed: {e}")
         return False
 
 if __name__ == "__main__":
@@ -70,7 +81,8 @@ if __name__ == "__main__":
         test_imports,
         test_config_loading,
         test_database,
-        test_new_modules
+        test_new_modules,
+        test_command_modules
     ]
     
     passed = 0

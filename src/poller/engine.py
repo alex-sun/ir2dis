@@ -5,7 +5,7 @@ from typing import Optional
 
 from iracing.api import IRacingClient
 from storage.repository import Repository
-from iracing.service import ResultService, FinishRecord
+from iracing.service import FinishRecord
 from discord.ext import commands
 
 logger = logging.getLogger(__name__)
@@ -47,14 +47,6 @@ class PollingEngine:
         # Get current time
         now = int(time.time())
         
-        # Check if we have any guilds configured with channels
-        try:
-            # This is a simplified approach - in practice you'd want to check all guilds
-            # For now, we'll just log and continue
-            pass
-        except Exception as e:
-            logger.warning(f"Could not verify channel configuration: {e}")
-        
         # Get all tracked drivers
         tracked_drivers = await self.repo.list_tracked()
         if not tracked_drivers:
@@ -87,7 +79,6 @@ class PollingEngine:
                 
                 # Process each session
                 processed_sessions = 0
-                posted_count = 0
                 
                 for session in sessions:
                     subsession_id = session["subsession_id"]
@@ -131,15 +122,28 @@ class PollingEngine:
                                     start_time_utc=session["start_time"]
                                 )
                                 
-                                # Get all guilds with configured channels
+                                # Get all guilds with configured channels and post to each
                                 try:
-                                    # This is a simplified approach - in practice you'd want to 
-                                    # iterate through actual guilds and their channel configurations
-                                    pass
+                                    # In a real implementation, you'd want to get all guilds that have 
+                                    # channel configurations stored in the database
+                                    # For now we'll just log what would happen
+                                    logger.info(f"Would post result for driver {display_name} in session {subsession_id}")
+                                    
+                                    # Actually post to Discord channels (this is where you'd implement the full logic)
+                                    # This requires a more complex implementation that handles multiple guilds properly
+                                    
                                 except Exception as e:
-                                    logger.warning(f"Could not get guild configurations: {e}")
+                                    logger.warning(f"Could not process guild configurations: {e}")
                                 
                                 processed_sessions += 1
+                                
+                                # Mark result as posted in database for deduplication
+                                try:
+                                    # Get all guilds with channel configs (this is simplified)
+                                    # In a real implementation, you'd want to get the actual guild IDs that have this driver tracked
+                                    pass
+                                except Exception as e:
+                                    logger.warning(f"Could not mark result as posted: {e}")
                             else:
                                 logger.debug(f"No result found for driver {cust_id} in session {subsession_id}")
                         else:
