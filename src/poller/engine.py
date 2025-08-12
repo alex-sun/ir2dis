@@ -58,12 +58,14 @@ class PollingEngine:
         # Process each driver
         for cust_id, display_name in tracked_drivers:
             try:
+                logger.debug(f"Processing driver {cust_id} ({display_name}) - type check: cust_id={type(cust_id)}, display_name={type(display_name)}")
+                
                 # Get last poll timestamp or default to 48 hours ago
                 last_poll_ts = await self.repo.get_last_poll_ts(cust_id)
                 if last_poll_ts is None:
                     last_poll_ts = now - (48 * 60 * 60)  # 48 hours
                 
-                logger.debug(f"Processing driver {cust_id} ({display_name}) with last poll timestamp {last_poll_ts}")
+                logger.debug(f"Processing driver {cust_id} ({display_name}) with last poll timestamp {last_poll_ts}, type: {type(last_poll_ts)}")
                 
                 # Search for recent sessions
                 sessions = await self.ir.search_recent_sessions(
@@ -103,6 +105,13 @@ class PollingEngine:
                             
                             if driver_result:
                                 # Create FinishRecord from the driver's result
+                                logger.debug(f"Creating FinishRecord for driver {cust_id}")
+                                
+                                # Debug: Log session data types before creating record
+                                logger.debug(f"Session data debug - subsession_id: {session['subsession_id']} (type: {type(session['subsession_id'])})")
+                                logger.debug(f"Session data debug - official: {session['official']} (type: {type(session['official'])})")
+                                logger.debug(f"Session data debug - series_name: {session['series_name']} (type: {type(session['series_name'])})")
+                                
                                 record = FinishRecord(
                                     subsession_id=subsession_id,
                                     cust_id=cust_id,
@@ -122,9 +131,11 @@ class PollingEngine:
                                     start_time_utc=session["start_time"]
                                 )
                                 
+                                logger.debug(f"FinishRecord created successfully - official field type: {type(record.official)}")
+                                
                                 # Get all guilds with configured channels and post to each
                                 try:
-                                    # In a real implementation, you'd want to get all guilds that have 
+                                    # In a real implementation, you'd want to get all guilds that have
                                     # channel configurations stored in the database
                                     # For now we'll just log what would happen
                                     logger.info(f"Would post result for driver {display_name} in session {subsession_id}")
