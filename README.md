@@ -27,6 +27,14 @@ A Discord bot that tracks iRacing race results and posts them to Discord channel
 └─────────────┘    └──────────────┘    └──────────────┘
 ```
 
+## API Endpoint Changes
+
+The bot previously used the deprecated `/data/results/search` endpoint which no longer exists on the NG API. This has been replaced with:
+- **stats/member_recent_races**: Returns last 10 official races for a member (fast path)
+- **results/get**: Fetch full session result once you have a subsession_id
+
+This change resolves the 404 errors that were occurring when calling non-existent endpoints.
+
 ## Setup
 
 ### Prerequisites

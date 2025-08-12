@@ -137,6 +137,8 @@ class IRacingClient:
             out[k] = str(v)
         return out
 
+    # This method is deprecated - use stats/member_recent_races and results/get instead
+    # for better reliability and to avoid 404 errors from non-existent endpoints
     async def search_recent_sessions(
         self, cust_id: int, start_time_epoch_s: int, end_time_epoch_s: int
     ) -> List[Dict[str, Any]]:
@@ -144,6 +146,9 @@ class IRacingClient:
         Query results/search for sessions involving cust_id (window ~last 48h).
         Filter to finished 'Race' simsession results.
         Returns list of minimal dicts containing subsession_id, series_name, track, start_time, official, etc.
+        
+        Note: This method uses the deprecated /results/search endpoint which no longer exists
+        on the NG API. It's kept for compatibility but should not be used in new code.
         """
         try:
             # Normalize parameters to handle booleans and other types properly
@@ -156,6 +161,7 @@ class IRacingClient:
                 'page_size': 50  # Get up to 50 results
             }
             
+            # This will fail with a 404 on the NG API - kept for reference only
             data = await self._get_json_via_download('results/search', params)
             
             # Filter for race sessions that are classified (finished)

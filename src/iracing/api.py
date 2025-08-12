@@ -155,52 +155,65 @@ class IRacingClient:
             
             raise Exception(f"Failed to fetch data from {path} after {max_retries} attempts")
     
-    async def search_recent_sessions(
-        self, cust_id: int, start_time_epoch_s: int, end_time_epoch_s: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Query results/search for sessions involving cust_id (window ~last 48h).
-        Filter to finished 'Race' simsession results.
-        Returns list of minimal dicts containing subsession_id, series_name, track, start_time, official, etc.
-        """
-        logger.debug(f"Searching recent sessions for driver {cust_id}")
-        
-        params = {
-            "custid": cust_id,
-            "start_time": start_time_epoch_s,
-            "end_time": end_time_epoch_s,
-            "simsession_type": 1,  # Race sessions only
-            "results_only": True,  # Only finished sessions
-            "include_qualified": False,
-            "include_unofficial": True,  # Include unofficial results (DNF is allowed)
-        }
-        
-        try:
-            data = await self._get_json_via_download("results/search", params)
-            
-            # Filter to only include race sessions that are finished and have classified results
-            sessions = []
-            for session in data.get("sessions", []):
-                if session.get("simsession_type") == 1:  # Race session
-                    # Check if it's a finished session with classified results
-                    if (session.get("results") is not None or 
-                        session.get("finished") is True or 
-                        session.get("status") in ["finished", "classified"]):
-                        sessions.append({
-                            "subsession_id": session.get("subsession_id"),
-                            "series_name": session.get("series_name"),
-                            "track_name": session.get("track_name"),
-                            "start_time": session.get("start_time"),
-                            "official": session.get("official"),
-                            "simsession_type": session.get("simsession_type")
-                        })
-            
-            logger.debug(f"Found {len(sessions)} recent race sessions for driver {cust_id}")
-            return sessions
-            
-        except Exception as e:
-            logger.error(f"Error searching recent sessions: {e}")
-            raise
+    # Returns the last 10 OFFICIAL races for a member (fast path for "latest race")
+    async def stats_member_recent_races(self, cust_id: int):
+        return await self._get_json_via_download("stats/member_recent_races", params={"cust_id": cust_id})
+    
+    # Fetch full session result once you have a subsession_id
+    async def results_get(self, subsession_id: int, include_licenses: bool = False):
+        return await self._get_json_via_download("results/get", params={
+            "subsession_id": subsession_id,
+            "include_licenses": include_licenses
+        })
+    
+    # OLD (WRONG): endpoint does not exist on NG API - kept for reference only
+    # async def search_recent_sessions(
+    #     self, cust_id: int, start_time_epoch_s: int, end_time_epoch_s: int
+    # ) -> List[Dict[str, Any]]:
+    #     """
+    #     Query results/search for sessions involving cust_id (window ~last 48h).
+    #     Filter to finished 'Race' simsession results.
+    #     Returns list of minimal dicts containing subsession_id, series_name, track, start_time, official, etc.
+    #     """
+    #     logger.debug(f"Searching recent sessions for driver {cust_id}")
+    #     
+    #     params = {
+    #         "custid": cust_id,
+    #         "start_time": start_time_epoch_s,
+    #         "end_time": end_time_epoch_s,
+    #         "simsession_type": 1,  # Race sessions only
+    #         "results_only": True,  # Only finished sessions
+    #         "include_qualified": False,
+    #         "include_unofficial": True,  # Include unofficial results (DNF is allowed)
+    #     }
+    #     
+    #     try:
+    #         data = await self._get_json_via_download("results/search", params)
+    #         
+    #         # Filter to only include race sessions that are finished and have classified results
+    #         sessions = []
+    #         for session in data.get("sessions", []):
+    #             if session.get("simsession_type") == 1:  # Race session
+    #                 # Check if it's a finished session with classified results
+    #                 if (session.get("results") is not None or 
+    #                     session.get("finished") is True or 
+    #                     session.get("status") in ["finished", "classified"]):
+    #                     sessions.append({
+    #                         "subsession_id": session.get("subsession_id"),
+    #                         "series_name": session.get("series_name"),
+    #                         "track_name": session.get("track_name"),
+    #                         "start_time": session.get("start_time"),
+    #                         "official": session.get("official"),
+    #                         "simsession_type": session.get("simsession_type")
+    #                     })
+    #         
+    #         logger.debug(f"Found {len(sessions)} recent race sessions for driver {cust_id}")
+    #         return sessions
+    #         
+    #     except Exception as e:
+    #         logger.error(f"Error searching recent sessions: {e}")
+    #         raise
+    
     
     async def get_subsession_results(self, subsession_id: int) -> Dict[str, Any]:
         """
