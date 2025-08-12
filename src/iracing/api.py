@@ -14,7 +14,7 @@ def _hash_password(raw_password: str, email: str) -> str:
 
 class IRacingClient:
     AUTH_URL = "https://members-ng.iracing.com/auth"
-    BASE_URL = "https://members-ng.iracing.com"
+    BASE_URL = "https://members-ng.iracing.com"  # data API host
     
     def __init__(self, username: str, password: str, session: Optional[aiohttp.ClientSession] = None):
         self.username = username
@@ -94,7 +94,7 @@ class IRacingClient:
                             continue
                         
                         if response.status != 200:
-                            raise Exception(f"Failed to get download link for {path}: {response.status}")
+                            raise Exception(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={params})")
                         
                         link_data = await response.json()
                         download_link = link_data.get("link")
@@ -221,4 +221,26 @@ class IRacingClient:
             
         except Exception as e:
             logger.error(f"Error looking up driver: {e}")
+            raise
+
+    async def member_get(self, cust_ids: list[int] | tuple[int, ...], include_licenses: bool = False) -> List[Dict[str, Any]]:
+        """Use member/get?cust_ids=... to get member details by numeric ID"""
+        logger.debug(f"Getting members for IDs: {cust_ids}")
+        
+        ids = ",".join(str(i) for i in cust_ids)
+        params = {
+            "cust_ids": ids,
+            "include_licenses": str(include_licenses).lower()
+        }
+        
+        try:
+            data = await self._get_json_via_download("member/get", params)
+            
+            # Return the list of members from the response
+            if 'members' in data:
+                return data['members']
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"Error getting member details: {e}")
             raise
