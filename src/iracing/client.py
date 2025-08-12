@@ -63,7 +63,7 @@ class IRacingClient:
         
         for attempt in range(max_retries):
             try:
-                url = f'https://members.iracing.com/data/{path}'
+                url = f'{self.BASE_URL}/data/{path.lstrip("/")}'
                 
                 async with self._semaphore:
                     async with self.session.get(url, params=params) as response:

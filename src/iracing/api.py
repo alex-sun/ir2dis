@@ -72,7 +72,7 @@ class IRacingClient:
                     
                     # First, get the download link
                     async with self.session.get(
-                        f"https://members.iracing.com/data/{path}",
+                        f"{self.BASE_URL}/data/{path.lstrip('/')}",
                         params=params,
                         headers={"User-Agent": "IR2DIS Bot"},
                         timeout=aiohttp.ClientTimeout(total=30)
@@ -114,6 +114,14 @@ class IRacingClient:
                         return await data_response.json()
                 
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Max retries exceeded for {path}: {e}")
+                        raise
+                    delay = base_delay * (2 ** attempt) + (attempt * 0.1)  # Add jitter
+                    delay = min(delay, 60)  # Cap at 60 seconds
+                    logger.warning(f"Network error on {path} (attempt {attempt + 1}), retrying in {delay:.2f}s: {e}")
+                    await asyncio.sleep(delay)
+                except Exception as e:
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries exceeded for {path}: {e}")
                         raise
