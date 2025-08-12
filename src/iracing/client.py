@@ -65,8 +65,11 @@ class IRacingClient:
             try:
                 url = f'{self.BASE_URL}/data/{path.lstrip("/")}'
                 
+                # Normalize params before sending to API
+                normalized_params = self._normalize_params(params)
+                
                 async with self._semaphore:
-                    async with self.session.get(url, params=params) as response:
+                    async with self.session.get(url, params=normalized_params) as response:
                         if response.status == 429:
                             # Rate limited - wait and retry
                             delay = min(base_delay * (2 ** attempt), max_delay)
@@ -114,6 +117,26 @@ class IRacingClient:
         
         raise Exception("Max retries exceeded in _get_json_via_download")
     
+    def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, str]:
+        """Normalize parameters to ensure they are strings, ints, or floats."""
+        if not params:
+            return {}
+        out: Dict[str, str] = {}
+        for k, v in params.items():
+            if v is None:
+                continue
+            # Booleans → "true"/"false"
+            if isinstance(v, bool):
+                out[k] = "true" if v else "false"
+                continue
+            # Iterables → CSV
+            if isinstance(v, (list, tuple, set)):
+                out[k] = ",".join(str(x) for x in v)
+                continue
+            # Everything else → string
+            out[k] = str(v)
+        return out
+
     async def search_recent_sessions(
         self, cust_id: int, start_time_epoch_s: int, end_time_epoch_s: int
     ) -> List[Dict[str, Any]]:
@@ -123,6 +146,7 @@ class IRacingClient:
         Returns list of minimal dicts containing subsession_id, series_name, track, start_time, official, etc.
         """
         try:
+            # Normalize parameters to handle booleans and other types properly
             params = {
                 'cust_id': cust_id,
                 'start_time': start_time_epoch_s,

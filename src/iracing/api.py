@@ -57,6 +57,26 @@ class IRacingClient:
             logger.error(f"Failed to authenticate with iRacing: {e}")
             raise
     
+    def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, str]:
+        """Normalize parameters to ensure they are strings, ints, or floats."""
+        if not params:
+            return {}
+        out: Dict[str, str] = {}
+        for k, v in params.items():
+            if v is None:
+                continue
+            # Booleans → "true"/"false"
+            if isinstance(v, bool):
+                out[k] = "true" if v else "false"
+                continue
+            # Iterables → CSV
+            if isinstance(v, (list, tuple, set)):
+                out[k] = ",".join(str(x) for x in v)
+                continue
+            # Everything else → string
+            out[k] = str(v)
+        return out
+
     async def _get_json_via_download(self, path: str, params: Dict[str, Any]) -> Any:
         """
         GET /data/<path>?... -> returns {"link": "..."}; then GET link to obtain JSON payload.
@@ -70,10 +90,13 @@ class IRacingClient:
                 try:
                     logger.debug(f"Fetching data from {path} (attempt {attempt + 1})")
                     
+                    # Normalize params before sending to API
+                    normalized_params = self._normalize_params(params)
+                    
                     # First, get the download link
                     async with self.session.get(
                         f"{self.BASE_URL}/data/{path.lstrip('/')}",
-                        params=params,
+                        params=normalized_params,
                         headers={"User-Agent": "IR2DIS Bot"},
                         timeout=aiohttp.ClientTimeout(total=30)
                     ) as response:
@@ -94,7 +117,7 @@ class IRacingClient:
                             continue
                         
                         if response.status != 200:
-                            raise Exception(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={params})")
+                            raise Exception(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={normalized_params})")
                         
                         link_data = await response.json()
                         download_link = link_data.get("link")
@@ -230,7 +253,7 @@ class IRacingClient:
         ids = ",".join(str(i) for i in cust_ids)
         params = {
             "cust_ids": ids,
-            "include_licenses": str(include_licenses).lower()
+            "include_licenses": include_licenses  # This will be normalized by _normalize_params
         }
         
         try:
