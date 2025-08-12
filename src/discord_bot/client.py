@@ -1,207 +1,170 @@
-#!/usr/bin/env python3
-"""
-Discord bot client for iRacing → Discord Auto-Results Bot.
-"""
-
+import os, logging
 import discord
+from discord import app_commands
 from discord.ext import commands
-from config.loader import load_config
-from store.database import get_db
-import os
 
-# Create the bot with command prefix and intents
-intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
-intents.members = True
+# Import our custom modules - moved to inside the class to avoid circular imports
+from iracing.service import FinishRecord
+logger = logging.getLogger(__name__)
 
 class IR2DISBot(commands.Bot):
-    def __init__(self, config, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.config = config
-
+    def __init__(self, repository, iracing_client, intents=None):
+        if intents is None:
+            intents = discord.Intents.default()
+            intents.message_content = True
+            intents.guilds = True
+        
+        # Initialize the bot with our custom repository and iRacing client
+        self.repo = repository
+        self.ir = iracing_client
+        
+        super().__init__(command_prefix='!', intents=intents)
+        
     async def setup_hook(self) -> None:
-        """Set up the bot with commands and configuration."""
-        # Register slash commands - moved from on_ready to setup_hook
-        await register_commands(self)
-
-def create_discord_bot(config) -> commands.Bot:
-    """
-    Create and configure the Discord bot.
-    
-    Args:
-        config: Configuration object
+        """Setup hook for Discord bot - sync commands."""
+        # --- Load all command extensions before syncing ---
+        command_extensions = [
+            "discord_bot.commands.ping",
+            "discord_bot.commands.track", 
+            "discord_bot.commands.untrack",
+            "discord_bot.commands.list_tracked",
+            "discord_bot.commands.set_channel",
+            "discord_bot.commands.test_post"
+        ]
         
-    Returns:
-        commands.Bot: Configured Discord bot instance
-    """
-    # Create the bot with a command prefix (we'll use slash commands instead)
-    bot = IR2DISBot(config, command_prefix='!', intents=intents)
-    return bot
-
-async def register_commands(bot):
-    """
-    Register all slash commands with the Discord bot.
-    
-    Args:
-        bot: Discord bot instance
-    """
-    # Clear existing commands and register new ones
-    try:
-        # Create a command tree for registering commands
-        # Remove await from these non-coroutine methods (they return None)
-        bot.tree.clear_commands(guild=None)  # Clear global commands
-        # Use environment variable for guild ID or remove per-guild clearing
-        guild_id = os.getenv("DISCORD_GUILD_ID")
-        if guild_id:
-            bot.tree.clear_commands(guild=discord.Object(id=int(guild_id)))  # Clear guild-specific if needed
-
-        # Register all slash commands
-        @bot.tree.command(name="setchannel", description="Set the results channel")
-        async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-            """Set the results channel for this server."""
+        loaded_extensions = []
+        for ext in command_extensions:
             try:
-                db = get_db()
-                guild_id = str(interaction.guild.id)
-                channel_id = str(channel.id)
-                
-                # Insert or update guild settings
-                db.execute('''
-                    INSERT OR REPLACE INTO guild (guild_id, channel_id, timezone) 
-                    VALUES (?, ?, ?)
-                ''', (guild_id, channel_id, bot.config.timezone_default))
-                db.commit()
-                
-                await interaction.response.send_message(
-                    f"✅ Results channel set to {channel.mention}", 
-                    ephemeral=True
-                )
+                await self.load_extension(ext)
+                logger.info("Loaded extension: %s", ext)
+                loaded_extensions.append(ext)
             except Exception as e:
-                print(f"Error in set_channel: {e}")
-                await interaction.response.send_message("❌ Error setting channel", ephemeral=True)
-
-        @bot.tree.command(name="track", description="Track a driver")
-        async def track_driver(interaction: discord.Interaction, cust_id: int):
-            """Track a driver by customer ID."""
-            try:
-                db = get_db()
-                guild_id = str(interaction.guild.id)
-                
-                # Check if the guild has a channel set up first
-                guild_row = db.execute('''
-                    SELECT * FROM guild WHERE guild_id = ?
-                ''', (guild_id,)).fetchone()
-                
-                if not guild_row:
-                    await interaction.response.send_message(
-                        "❌ Please set a results channel first using `/setchannel`", 
-                        ephemeral=True
-                    )
-                    return
-                
-                # Add the driver to tracking list
-                db.execute('''
-                    INSERT OR REPLACE INTO tracked_driver (guild_id, cust_id, display_name, active) 
-                    VALUES (?, ?, ?, 1)
-                ''', (guild_id, cust_id, f"Driver {cust_id}"))
-                db.commit()
-                
-                await interaction.response.send_message(
-                    f"✅ Tracking driver with ID {cust_id}", 
-                    ephemeral=True
-                )
-            except Exception as e:
-                print(f"Error in track_driver: {e}")
-                await interaction.response.send_message("❌ Error tracking driver", ephemeral=True)
-
-        @bot.tree.command(name="untrack", description="Stop tracking a driver")
-        async def untrack_driver(interaction: discord.Interaction, cust_id: int):
-            """Untrack a driver by customer ID."""
-            try:
-                db = get_db()
-                guild_id = str(interaction.guild.id)
-                
-                # Remove the driver from tracking list
-                db.execute('''
-                    DELETE FROM tracked_driver WHERE guild_id = ? AND cust_id = ?
-                ''', (guild_id, cust_id))
-                db.commit()
-                
-                await interaction.response.send_message(
-                    f"✅ Stopped tracking driver with ID {cust_id}", 
-                    ephemeral=True
-                )
-            except Exception as e:
-                print(f"Error in untrack_driver: {e}")
-                await interaction.response.send_message("❌ Error stopping track", ephemeral=True)
-
-        @bot.tree.command(name="list", description="List tracked drivers")
-        async def list_drivers(interaction: discord.Interaction):
-            """List all tracked drivers for this server."""
-            try:
-                db = get_db()
-                guild_id = str(interaction.guild.id)
-                
-                # Get tracked drivers
-                drivers = db.execute('''
-                    SELECT cust_id, display_name FROM tracked_driver WHERE guild_id = ? AND active = 1
-                ''', (guild_id,)).fetchall()
-                
-                if not drivers:
-                    await interaction.response.send_message("❌ No drivers are currently being tracked", ephemeral=True)
-                    return
-                
-                driver_list = "\n".join([f"• Driver ID: {driver['cust_id']} ({driver['display_name']})" for driver in drivers])
-                await interaction.response.send_message(f"📋 Tracked drivers:\n{driver_list}", ephemeral=True)
-            except Exception as e:
-                print(f"Error in list_drivers: {e}")
-                await interaction.response.send_message("❌ Error listing drivers", ephemeral=True)
-
-        @bot.tree.command(name="lastrace", description="Get last race result for a driver")
-        async def lastrace(interaction: discord.Interaction, cust_id: int):
-            """Get the last race result for a driver."""
-            try:
-                db = get_db()
-                guild_id = str(interaction.guild.id)
-                
-                # Check if the guild has a channel set up first
-                guild_row = db.execute('''
-                    SELECT * FROM guild WHERE guild_id = ?
-                ''', (guild_id,)).fetchone()
-                
-                if not guild_row:
-                    await interaction.response.send_message(
-                        "❌ Please set a results channel first using `/setchannel`", 
-                        ephemeral=True
-                    )
-                    return
-                
-                # Check if driver is being tracked
-                tracked_driver = db.execute('''
-                    SELECT * FROM tracked_driver WHERE guild_id = ? AND cust_id = ? AND active = 1
-                ''', (guild_id, cust_id)).fetchone()
-                
-                if not tracked_driver:
-                    await interaction.response.send_message(
-                        f"❌ Driver with ID {cust_id} is not being tracked. Use `/track {cust_id}` first.", 
-                        ephemeral=True
-                    )
-                    return
-                
-                # Simulate getting the last race result (in a real implementation, this would fetch from iRacing API)
-                await interaction.response.send_message(
-                    f"🏁 Last race result for driver ID {cust_id}:\n"
-                    f"- This is a placeholder response\n"
-                    f"- In a full implementation, this would show actual race data", 
-                    ephemeral=True
-                )
-            except Exception as e:
-                print(f"Error in lastrace: {e}")
-                await interaction.response.send_message("❌ Error getting last race result", ephemeral=True)
-
-        # Sync commands with Discord API - keep only this awaited call
-        await bot.tree.sync()
-        print("✅ Slash commands registered successfully")
+                logger.error("Failed to load extension %s: %s", ext, e)
         
-    except Exception as e:
-        print(f"Error registering slash commands: {e}")
+        logger.info("Imported command extensions: %s", loaded_extensions)
+
+        # Diagnostics: list what we're about to sync
+        cmds = [c.name for c in self.tree.get_commands(guild=None)]
+        logger.info("Commands detected in tree: %s", cmds)
+        if not cmds:
+            logger.warning("WARNING: No commands were discovered before sync")
+
+        # Global sync (slow to propagate, needed for broad availability)
+        try:
+            global_synced = await self.tree.sync()
+            logger.info("Synced %d GLOBAL commands", len(global_synced))
+            
+            if len(global_synced) == 0:
+                logger.warning("WARNING: No commands were synced! This indicates a fundamental registration issue.")
+                
+        except Exception as e:
+            logger.exception("Global command sync failed: %r", e)
+
+        # Instant per-guild sync for dev/testing ---
+        dev_gid = int(os.getenv("DEV_GUILD_ID", "421260739055976468"))
+        try:
+            guild = discord.Object(id=dev_gid)
+            self.tree.copy_global_to(guild=guild)
+            guild_synced = await self.tree.sync(guild=guild)
+            logger.info("Synced %d commands to GUILD %s", len(guild_synced), dev_gid)
+            
+            if not guild_synced:
+                logger.warning("WARNING: No commands were synced to guild %s", dev_gid)
+                
+        except Exception as e:
+            logger.exception("Guild command sync failed for %s: %r", dev_gid, e)
+
+    async def on_ready(self):
+        try:
+            app_info = await self.application_info()
+            logger.info(
+                "Bot ready: user=%s (%s) | application_id=%s | guilds=%d",
+                self.user, getattr(self.user, "id", None), app_info.id, len(self.guilds)
+            )
+        except Exception as e:
+            logger.exception("on_ready logging failed: %r", e)
+
+    @commands.Cog.listener()
+    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
+        logger.exception("App command error: %r", error)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ Command failed.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Command failed.", ephemeral=True)
+        except Exception:
+            pass
+
+    async def post_finish_embed(self, record: FinishRecord, channel_id: int) -> None:
+        """Post a finish embed to Discord."""
+        try:
+            import discord
+            
+            # Determine color based on finish position
+            if record.finish_pos <= 3:
+                color = discord.Color.green()
+            elif record.finish_pos <= 10:
+                color = discord.Color.orange()
+            else:
+                color = discord.Color.red()
+            
+            # Build embed title and description
+            title = f"🏁 {record.display_name} — P{record.finish_pos}"
+            if record.finish_pos_in_class:
+                title += f" (Class P{record.finish_pos_in_class})"
+            
+            description_lines = [
+                f"**Series:** {record.series_name} • **Track:** {record.track_name} • **Car:** {record.car_name}",
+                f"**Field:** {record.field_size} • **Laps:** {record.laps} • **Inc:** {record.incidents} • **SOF:** {record.sof or '—'}"
+            ]
+            
+            if record.best_lap_time_s:
+                description_lines.append(f"**Best:** {record.best_lap_time_s:.3f}s")
+            
+            description_lines.append("Official: ✅" if record.official else "Official: ❌")
+            
+            embed = discord.Embed(
+                title=title,
+                description="\n".join(description_lines),
+                color=color
+            )
+            
+            embed.set_footer(text=f"Subsession {record.subsession_id} • {record.start_time_utc}")
+            
+            # Get channel and send embed
+            channel = self.get_channel(channel_id)
+            if not channel:
+                logger.warning(f"Channel {channel_id} not found in cache, fetching...")
+                try:
+                    channel = await self.fetch_channel(channel_id)
+                except discord.NotFound:
+                    logger.error(f"Channel {channel_id} not found")
+                    return
+                except Exception as e:
+                    logger.error(f"Error fetching channel {channel_id}: {e}")
+                    return
+            
+            await channel.send(embed=embed)
+            logger.info(f"Posted embed for driver {record.display_name} in channel {channel_id}")
+            
+        except Exception as e:
+            logger.error(f"Error posting finish embed: {e}")
+
+# Keep the old client for backward compatibility if needed
+class IR2DISClient(discord.Client):
+    def __init__(self, repository, iracing_client):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.guilds = True
+        
+        self.repo = repository
+        self.ir = iracing_client
+        
+        super().__init__(intents=intents)
+        
+    async def setup_hook(self):
+        """Setup hook for Discord client."""
+        pass
+
+# Export the main bot class
+__all__ = ['IR2DISBot']

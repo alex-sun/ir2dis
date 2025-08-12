@@ -1,238 +1,195 @@
-# iRacing → Discord Auto-Results Bot - Technical Specification
+# Technical Specification for iRacing to Discord Bot
 
-## Project Overview
+## Overview
+This document outlines the technical implementation of the iRacing to Discord bot (ir2dis) that tracks race results and posts them to Discord channels.
 
-A Discord bot that automatically posts iRacing race results for tracked drivers into a configured channel. The system is designed with modularity, scalability, and reliability in mind.
+## Architecture
 
-## Project Structure
+### Core Components
+
+1. **Discord Bot** (`src/discord_bot/client.py`)
+   - Slash command interface for driver management and configuration
+   - Embed formatting and posting functionality
+   - Command handling and user interaction
+
+2. **iRacing API Client** (`src/iracing/api.py`)
+   - Implements official Data API 2-step "download link" flow
+   - Handles authentication, cookie management, and retries
+   - Async HTTP requests using aiohttp
+
+3. **Result Service** (`src/iracing/service.py`)
+   - Orchestrates polling workflow
+   - Result enrichment and DTO creation for Discord
+   - Deduplication logic
+
+4. **Storage Layer** (`src/storage/repository.py`)
+   - Database persistence for tracked drivers, channel configs, posted results, and poll state
+   - SQLite database with proper schema design
+
+5. **Polling Engine** (`src/poller/engine.py`)
+   - Scheduled polling of iRacing API
+   - Concurrency control and rate limiting
+   - Error handling and retry logic
+
+## File Structure
 
 ```
-ir2dis/
-├── src/
-│   ├── discord/              # Discord bot modules
-│   │   ├── __init__.py
-│   │   ├── commands.py       # Slash command handlers
-│   │   ├── client.py         # Discord client wrapper
-│   │   └── embed_builder.py  # Embed formatting
-│   ├── iracing/              # iRacing API integration
-│   │   ├── __init__.py
-│   │   ├── auth.py           # Authentication and cookie management
-│   │   ├── client.py         # API client with 2-step fetch pattern
-│   │   └── models.py         # Data models for iRacing responses
-│   ├── poller/               # Polling engine
-│   │   ├── __init__.py
-│   │   ├── engine.py         # Main polling logic
-│   │   ├── scheduler.py      # Scheduling and deduplication
-│   │   └── backoff.py        # Retry/backoff logic
-│   ├── store/                # Database layer
-│   │   ├── __init__.py
-│   │   ├── database.py       # DB connection manager
-│   │   ├── models.py         # ORM models for tables
-│   │   ├── migrations.py     # Migration handling
-│   │   └── repo.py           # Repository patterns for each table
-│   ├── config/               # Configuration management
-│   │   ├── __init__.py
-│   │   ├── loader.py         # Load from ENV + file
-│   │   └── models.py         # Config models
-│   ├── observability/        # Logging and metrics
-│   │   ├── __init__.py
-│   │   ├── logger.py         # Structured logging
-│   │   └── metrics.py        # Metrics counters
-│   ├── utils/                # Utility functions
-│   │   ├── __init__.py
-│   │   ├── hash.py           # Password hashing
-│   │   └── timezone.py       # Timezone handling
-│   └── main.py               # Entry point
-├── data/
-│   ├── .gitkeep              # Empty placeholder
-│   ├── cookies.json          # Cookie persistence
-│   └── config.json           # Optional config file
-├── tests/                    # Test directory
-│   ├── __init__.py
-│   ├── test_discord.py
-│   ├── test_iracing.py
-│   ├── test_poller.py
-│   ├── test_store.py
-│   └── test_config.py
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-└── README.md
+src/
+├── main.py                 # Main entry point
+├── iracing/
+│   ├── __init__.py         # Package init
+│   ├── api.py              # iRacing API client
+│   └── service.py          # Result processing service
+├── storage/
+│   ├── __init__.py         # Package init
+│   └── repository.py       # Database operations
+├── discord_bot/
+│   ├── __init__.py         # Package init
+│   └── client.py           # Discord bot implementation
+└── poller/
+    ├── __init__.py         # Package init
+    └── engine.py           # Polling engine
 ```
 
-## Core Implementation Components
+## iRacing API Integration
 
-### 1. Configuration Management
-- Load from ENV variables with fallbacks to config file and defaults
-- Validate required parameters (DISCORD_TOKEN, IRACING_EMAIL, IRACING_PASSWORD)
-- Support timezone configuration and polling intervals
-- Environment variable validation and error handling
+### Authentication Flow
+- Uses 2-step download link flow as per official Data API specification
+- Maintains session cookies for subsequent requests
+- Implements retry logic with exponential backoff for HTTP 429/5xx errors
 
-### 2. Database Layer (SQLite first)
-**Tables:**
-- `guild` (guild_id, channel_id, timezone, created_at, updated_at)
-- `tracked_driver` (guild_id, cust_id, display_name, active, created_by, created_at)
-- `last_seen` (guild_id, cust_id, last_subsession_id, last_finish_at)
-- `post_history` (guild_id, subsession_id, message_id, posted_at)
-- `auth_state` (id, cookies_json, updated_at)
+### Endpoints Used
+1. `lookup/drivers` - Driver name resolution
+2. `results/search` - Session search by driver ID and time window
+3. `results/get` - Full session results retrieval
 
-**Features:**
-- Implement all tables as specified in the schema
-- Migration system for schema updates
-- Repository patterns for each table
-- Support for SQLite, MariaDB, and PostgreSQL via environment variables
+## Database Schema
 
-### 3. iRacing API Integration
-**Authentication Module:**
-- Password hashing using SHA256 + base64
-- Cookie persistence to JSON file
-- CAPTCHA detection and error handling
-- Session management with proper cleanup
+### Tables
 
-**HTTP Client:**
-- 2-step fetch pattern (GET → GET via link)
-- Retry logic with exponential backoff
-- Rate limit handling
-- Connection pooling for concurrent requests
+1. **tracked_drivers**
+   ```sql
+   CREATE TABLE IF NOT EXISTS tracked_drivers (
+       cust_id INTEGER PRIMARY KEY,
+       display_name TEXT,
+       added_at TEXT
+   );
+   ```
 
-**Data Fetching Methods:**
-- `getRecentRaces(cust_id)` - Get recent race results for a driver
-- `getSubsession(subsession_id)` - Get detailed subsession information
+2. **channel_config**
+   ```sql
+   CREATE TABLE IF NOT EXISTS channel_config (
+       guild_id TEXT PRIMARY KEY,
+       channel_id TEXT NOT NULL,
+       mode TEXT DEFAULT 'production'
+   );
+   ```
 
-### 4. Discord Bot
-**Slash Commands:**
-- `/setchannel #channel` - Set the results channel
-- `/track <cust_id>` - Track a driver
-- `/untrack <cust_id>` - Stop tracking a driver
-- `/list` - List tracked drivers
-- `/lastrace <cust_id>` - Get last race result for a driver
-- `/settz` (optional) - Set timezone
+3. **posted_results**
+   ```sql
+   CREATE TABLE IF NOT EXISTS posted_results (
+       subsession_id INTEGER,
+       cust_id INTEGER,
+       guild_id TEXT,
+       posted_at TEXT,
+       PRIMARY KEY(subsession_id, cust_id, guild_id)
+   );
+   ```
 
-**Features:**
-- Permission checking logic
-- Embed building with proper formatting
-- Command registration and error handling
-- Message posting with proper Discord API integration
+4. **poll_state**
+   ```sql
+   CREATE TABLE IF NOT EXISTS poll_state (
+       cust_id INTEGER PRIMARY KEY,
+       last_poll_ts INTEGER
+   );
+   ```
 
-### 5. Polling Engine
-**Main Features:**
-- Main polling loop that runs at configured intervals
-- Guild-by-guild processing
-- Deduplication logic using post_history table
-- New result detection against last_seen data
-- Proper error handling and logging
-- Bounded concurrency for iRacing requests (4-8 concurrent)
+## Polling Workflow
 
-### 6. Observability
-**Logging:**
-- Structured JSON logging with key events
-- Comprehensive event tracking throughout the system
+### Algorithm
+1. For each tracked driver:
+   - Determine polling window (last poll timestamp or 48h ago)
+   - Search for recent sessions involving the driver
+   - Filter to finished Race sessions only
+2. For each session:
+   - Check if result already posted (deduplication)
+   - Fetch full results
+   - Extract driver's row
+   - Post Discord embed
+   - Mark as posted in database
+3. Update last poll timestamp
 
-**Metrics:**
-- `poll_cycles_total` - Total polling cycles completed
-- `results_fetched_total` - Results fetched from iRacing API
-- `posts_published_total` - Posts published to Discord
-- `dedupe_skips_total` - Duplicates skipped during processing
-- `auth_failures_total` - Authentication failures
-- `captcha_required_total` - CAPTCHA challenges encountered
-- `rate_limited_total` - Rate limit events
+### Concurrency & Rate Limiting
+- Uses `asyncio.Semaphore(4)` for API calls
+- Processes drivers sequentially to avoid hammering endpoints
+- Implements jittered exponential backoff on 429 errors (max 60s)
 
-**Health Endpoint:**
-- Monitoring endpoint for system health checks
+## Discord Embed Format
 
-### 7. Dockerization
-**Dockerfile Features:**
-- Multi-stage build for minimal runtime
-- Volume mapping for data persistence
-- Healthcheck implementation
-- Proper environment variable handling
+### Structure
+- **Title**: `🏁 {display_name} — P{finish_pos}{f" (Class P{finish_pos_in_class})" if class}`
+- **Description**:
+  - Series, Track, Car
+  - Field size, Laps, Incidents, SOF
+  - Best lap time (if available)
+  - Official status indicator
+- **Footer**: `Subsession {subsession_id} • {start_time_utc}`
+- **Color**: 
+  - Green for P1-P3
+  - Orange for P4-P10  
+  - Red otherwise
 
-**docker-compose.yml:**
-- Service definition with proper volume mounts
-- Environment variable configuration
-- Network setup for container communication
+## Configuration
 
-## Implementation Approach
+### Environment Variables
+- `IR_USERNAME` / `IR_PASSWORD`: iRacing credentials
+- `DISCORD_TOKEN`: Discord bot token
+- `POLL_INTERVAL_SEC`: Polling interval (default: 120)
+- `LOG_LEVEL`: Logging verbosity (default: INFO)
+- `DEV_GUILD_ID`: Discord guild ID for instant command sync during development
 
-Following the agent-friendly work plan milestones:
+### Docker Integration
+- Configured via `docker-compose.dev.yml`
+- Volume mounts for code and data persistence
 
-1. **Project Scaffold** - Basic structure and config loading
-2. **Database Layer** - All tables and migrations implementation  
-3. **iRacing Client** - Auth and data fetching capabilities
-4. **Discord Bot** - Commands and message posting functionality
-5. **Polling Engine** - Deduplication and processing logic
-6. **Packaging** - Dockerization with proper deployment configuration
-7. **Testing** - Unit/integration tests for all components
+## Error Handling & Resilience
 
-## Key Technical Decisions
+### Retry Logic
+- HTTP 429/5xx errors with exponential backoff
+- Jittered delays to prevent thundering herd
+- Maximum retry duration of 60 seconds
 
-### Language & Frameworks
-- **Language**: Python 3.9+ for rapid development with good ecosystem support
-- **Web Framework**: discord.py or similar for Discord integration
-- **Database**: SQLite as default with option to switch to MariaDB/Postgres via environment variable
-
-### Concurrency & Performance
-- Bounded pool for iRacing requests (4-8 concurrent)
-- Asynchronous processing where appropriate
-- Rate limiting and backoff strategies
-
-### Error Handling & Reliability
-- Graceful degradation - failures in one driver don't stop others
-- Comprehensive error handling with proper logging
-- Retry mechanisms with exponential backoff
-- Circuit breaker patterns for external services
-
-### Security
-- No secrets in logs, password hashing, secure cookie storage
-- Environment variables for sensitive data
-- Proper session management and cleanup
-- Input validation and sanitization
-
-### Persistence & State Management
-- Cookies stored in JSON file for authentication persistence
-- DB schema with proper indices for performance
-- Data migration system for schema evolution
-- Volume mapping for Docker deployments
-
-## Architecture Principles
-
-1. **Modularity**: Each component has clear responsibilities and interfaces
-2. **Separation of Concerns**: Business logic separated from infrastructure concerns  
-3. **Scalability**: Designed to handle multiple guilds and drivers efficiently
-4. **Maintainability**: Clear code organization and documentation
-5. **Reliability**: Graceful error handling and recovery mechanisms
-6. **Observability**: Comprehensive logging and metrics for monitoring
-
-## Data Flow
-
-1. **Configuration Loading** → 2. **Database Initialization** → 3. **Discord Bot Startup** → 4. **Polling Loop** → 5. **iRacing API Requests** → 6. **Data Processing** → 7. **Discord Message Posting**
-
-## Deployment Considerations
-
-### Docker Deployment
-- Multi-stage Dockerfile for minimal runtime images
-- Volume mounts for persistent data storage
-- Environment variable configuration through docker-compose
-- Health checks for monitoring and auto-restart capabilities
-
-### Production Requirements
-- Proper logging configuration
-- Database connection pooling
-- Rate limiting to prevent API abuse
-- Monitoring and alerting setup
-- Backup strategies for critical data
+### Graceful Degradation
+- Network/auth errors logged but don't crash poller
+- Polling continues even if individual driver fails
+- Database operations wrapped in error handling
 
 ## Testing Strategy
 
-- Unit tests for individual components
-- Integration tests for end-to-end functionality  
-- Mock testing for external APIs
-- Configuration validation tests
-- Database migration tests
-- Performance testing with simulated load
+### Unit Tests
+1. `test_iracing_api_download_flow.py` - API flow and retry behavior
+2. `test_result_service_dedupe.py` - Deduplication logic
+3. `test_embed_format.py` - Embed formatting consistency
 
-## Contribution Standards
+### Test Fixtures
+- JSON samples under `tests/fixtures/`
+- Mock data for results/search endpoints
 
-All contributions should follow the commit message standards outlined in [CONTRIBUTING.md](CONTRIBUTING.md) to ensure consistent, meaningful commit messages that make our history easy to understand and parse.
+## Deployment
 
-This technical specification serves as the comprehensive reference for understanding both the project requirements and implementation details. It should be consulted when working on any part of the system to maintain consistency and adherence to design principles.
+### Local Development
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+### Production
+- Standard Docker deployment with environment configuration
+- Database persistence via volume mounts
+- Proper logging and monitoring setup
+
+## Security Considerations
+
+- Credentials never logged to console
+- Environment variable based configuration
+- Bot account recommended for iRacing access
+- Rate limiting prevents abuse of APIs
