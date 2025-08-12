@@ -83,6 +83,7 @@ docker compose -f .\docker-compose.dev.yml up --build
 - `/untrack <cust_id>` - Untrack a driver by ID
 - `/list_tracked` - List all tracked drivers
 - `/set_channel #channel` - Set the channel for race results
+- `/lastrace customer_id:<id>` - Show the last completed official race for an iRacing member
 - `/test_post` - Post a test embed to the configured channel
 
 ## Database Schema
