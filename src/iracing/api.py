@@ -12,6 +12,10 @@ def _hash_password(raw_password: str, email: str) -> str:
     digest = hashlib.sha256(salted.encode("utf-8")).digest()
     return base64.b64encode(digest).decode("ascii")
 
+class APIError(Exception):
+    """Raised for non-200 or malformed iRacing API responses."""
+    pass
+
 class IRacingClient:
     AUTH_URL = "https://members-ng.iracing.com/auth"
     BASE_URL = "https://members-ng.iracing.com"  # data API host
@@ -48,14 +52,14 @@ class IRacingClient:
             ) as response:
                 if response.status != 200:
                     txt = await response.text()
-                    raise Exception(f"Auth failed: {response.status} {txt[:200]}")
+                    raise APIError(f"Auth failed: {response.status} {txt[:200]}")
                 
                 # Cookies are automatically stored in the session and will be reused
                 logger.info("iRacing authentication completed successfully")
                 
         except Exception as e:
             logger.error(f"Failed to authenticate with iRacing: {e}")
-            raise
+            raise APIError(f"Failed to authenticate with iRacing: {e}")
     
     def _normalize_params(self, params: Dict[str, Any]) -> Dict[str, str]:
         """Normalize parameters to ensure they are strings, ints, or floats."""
@@ -117,13 +121,13 @@ class IRacingClient:
                             continue
                         
                         if response.status != 200:
-                            raise Exception(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={normalized_params})")
+                            raise APIError(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={normalized_params})")
                         
                         link_data = await response.json()
                         download_link = link_data.get("link")
                         
                         if not download_link:
-                            raise Exception(f"No download link found in response for {path}")
+                            raise APIError(f"No download link found in response for {path}")
                     
                     # Now fetch the actual JSON data from the download link
                     async with self.session.get(
@@ -134,8 +138,6 @@ class IRacingClient:
                         if data_response.status != 200:
                             raise Exception(f"Failed to fetch data from download link: {data_response.status}")
                         
-                        return await data_response.json()
-                
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries exceeded for {path}: {e}")
@@ -147,13 +149,13 @@ class IRacingClient:
                 except Exception as e:
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries exceeded for {path}: {e}")
-                        raise
+                        raise APIError(f"Max retries exceeded for {path}: {e}")
                     delay = base_delay * (2 ** attempt) + (attempt * 0.1)  # Add jitter
                     delay = min(delay, 60)  # Cap at 60 seconds
                     logger.warning(f"Network error on {path} (attempt {attempt + 1}), retrying in {delay:.2f}s: {e}")
                     await asyncio.sleep(delay)
             
-            raise Exception(f"Failed to fetch data from {path} after {max_retries} attempts")
+            raise APIError(f"Failed to fetch data from {path} after {max_retries} attempts")
     
     # Returns the last 10 OFFICIAL races for a member (fast path for "latest race")
     async def stats_member_recent_races(self, cust_id: int):
@@ -165,6 +167,36 @@ class IRacingClient:
             "subsession_id": subsession_id,
             "include_licenses": include_licenses
         })
+
+    # --- Back-compat shim for poller ---
+    def search_recent_sessions(
+        self,
+        *,
+        cust_id: int,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        simsession_type: int | None = None,
+        results_only: bool = True,
+        include_qualified: bool = False,
+        include_unofficial: bool = True,
+        limit: int | None = None,
+    ):
+        """
+        Backward-compatible replacement for the old results/search call.
+        We now use stats/member_recent_races (official only) and ignore
+        unsupported filters. Returns rows that at least include 'subsession_id',
+        which is what the poller needs to fetch full results.
+        """
+        # For backward compatibility, we'll use the new NG endpoints
+        # The old method had many parameters but we can map them appropriately
+        rows = self.stats_member_recent_races(cust_id) or []
+        if limit is not None and limit >= 0:
+            rows = rows[:limit]
+        return rows
+
+    def fetch_session_result(self, subsession_id: int):
+        """Compatibility wrapper used by poller, calls results/get."""
+        return self.results_get(subsession_id)
     
     # OLD (WRONG): endpoint does not exist on NG API - kept for reference only
     # async def search_recent_sessions(
@@ -230,7 +262,7 @@ class IRacingClient:
             return data
         except Exception as e:
             logger.error(f"Error fetching subsession results: {e}")
-            raise
+            raise APIError(f"Error fetching subsession results: {e}")
     
     async def lookup_driver(self, query: str) -> List[Dict[str, Any]]:
         """Use lookup/drivers?search=... -> [{cust_id, display_name, ...}]"""
@@ -257,7 +289,7 @@ class IRacingClient:
             
         except Exception as e:
             logger.error(f"Error looking up driver: {e}")
-            raise
+            raise APIError(f"Error looking up driver: {e}")
 
     async def member_get(self, cust_ids: list[int] | tuple[int, ...], include_licenses: bool = False) -> List[Dict[str, Any]]:
         """Use member/get?cust_ids=... to get member details by numeric ID"""
@@ -279,4 +311,4 @@ class IRacingClient:
                 return []
         except Exception as e:
             logger.error(f"Error getting member details: {e}")
-            raise
+            raise APIError(f"Error getting member details: {e}")

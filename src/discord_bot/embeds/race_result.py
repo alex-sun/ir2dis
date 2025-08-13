@@ -3,8 +3,12 @@ Helper module for building race result embeds that are identical to what the pol
 This ensures consistency between automated poller messages and manual /lastrace command responses.
 """
 
+from __future__ import annotations
 import discord
-from iracing.service import FinishRecord
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    # adjust to the real location of the dataclass; this avoids runtime import
+    from iracing.service import FinishRecord
 
 
 def build_race_result_embed(record: FinishRecord) -> discord.Embed:
