@@ -34,14 +34,20 @@ async def fetch_last_official_result(api: IRacingClient, cust_id: int) -> Finish
     
     try:
         # Get last 10 official races for the member (fast path)
-        rows = await api.stats_member_recent_races(cust_id) or []
+        payload = await api.stats_member_recent_races(cust_id) or {}
+        if isinstance(payload, dict):
+            rows = payload.get("races", []) or []
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            rows = []
         if not rows:
             logger.info(f"No recent races found for driver {cust_id}")
             return None
         
         # Take the first completed row; shape matches NG stats rows
         latest = rows[0]
-        subsession_id = int(latest["subsession_id"])
+        subsession_id = int(latest.get("subsession_id"))
         
         # Fetch full session result (what the poller uses to render embeds)
         results = await api.results_get(subsession_id, include_licenses=False)

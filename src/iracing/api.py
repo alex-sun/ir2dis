@@ -174,7 +174,12 @@ class IRacingClient:
                             _raise_with_body(f"Failed to download payload for {path}", data_response)
                         
                         try:
-                            return await data_response.json()
+                            obj = await data_response.json()
+                            # Optional: DEBUG one-liner to understand shapes during dev
+                            logger.debug("GET %s → type=%s keys=%s",
+                                         path, type(obj).__name__,
+                                         list(obj.keys())[:5] if isinstance(obj, dict) else "n/a")
+                            return obj
                         except Exception:
                             _raise_with_body(f"Non-JSON payload for {path}", data_response)
                     
@@ -239,7 +244,13 @@ class IRacingClient:
 
         # These legacy time keys are accepted but ignored in this shim:
         # start_time_epoch_s, end_time_epoch_s, start_time, end_time, simsession_type, results_only
-        rows = self.stats_member_recent_races(cust_id) or []
+        payload = self.stats_member_recent_races(cust_id) or {}
+        if isinstance(payload, dict):
+            rows = payload.get("races", []) or []
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            rows = []
         if limit is not None and limit >= 0:
             rows = rows[:limit]
         return rows
