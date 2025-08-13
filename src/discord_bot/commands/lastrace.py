@@ -4,6 +4,7 @@ This command provides identical output to what the poller posts when it detects 
 """
 
 from __future__ import annotations
+import asyncio
 import logging
 import discord
 from discord import app_commands, Interaction
@@ -42,7 +43,8 @@ class LastraceCommand(commands.Cog):
             return
 
         try:
-            result = await fetch_last_official_result(api, customer_id)
+            # IRacingClient methods are sync; run them off the event loop
+            result = await asyncio.to_thread(fetch_last_official_result, api, customer_id)
         except APIError as e:
             logger.error("lastrace: API error for %s: %s", customer_id, e)
             await interaction.followup.send(f"Failed to fetch last race for {customer_id}. Please check the ID and try again.", ephemeral=True)

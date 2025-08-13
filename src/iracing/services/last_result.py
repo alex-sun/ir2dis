@@ -113,7 +113,9 @@ async def fetch_last_official_result_simple(api: IRacingClient, cust_id: int) ->
         
         logger.debug(f"Searching recent sessions for driver {cust_id} from {start_time_epoch_s} to {now}")
         
-        sessions = await api.search_recent_sessions(
+        # IRacingClient methods are sync; run them off the event loop
+        sessions = await asyncio.to_thread(
+            api.search_recent_sessions,
             cust_id=cust_id,
             start_time_epoch_s=start_time_epoch_s,
             end_time_epoch_s=now
@@ -129,7 +131,8 @@ async def fetch_last_official_result_simple(api: IRacingClient, cust_id: int) ->
             subsession_id = session["subsession_id"]
             
             try:
-                results = await api.get_subsession_results(subsession_id)
+                # IRacingClient methods are sync; run them off the event loop
+                results = await asyncio.to_thread(api.get_subsession_results, subsession_id)
                 
                 # Find this driver's result
                 driver_result = None

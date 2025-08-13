@@ -68,7 +68,9 @@ class PollingEngine:
                 logger.debug(f"Processing driver {cust_id} ({display_name}) with last poll timestamp {last_poll_ts}, type: {type(last_poll_ts)}")
                 
                 # Search for recent sessions
-                sessions = await self.ir.search_recent_sessions(
+                # IRacingClient methods are sync; run them off the event loop
+                sessions = await asyncio.to_thread(
+                    self.ir.search_recent_sessions,
                     cust_id=cust_id,
                     start_time_epoch_s=last_poll_ts,
                     end_time_epoch_s=now
@@ -94,7 +96,8 @@ class PollingEngine:
                             logger.debug(f"Session {subsession_id} not yet posted, fetching results")
                             
                             # Get full session results
-                            results = await self.ir.get_subsession_results(subsession_id)
+                            # IRacingClient methods are sync; run them off the event loop
+                            results = await asyncio.to_thread(self.ir.get_subsession_results, subsession_id)
                             
                             # Find this driver's result in the session
                             driver_result = None
