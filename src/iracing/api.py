@@ -24,7 +24,10 @@ class AuthError(APIError):
 
 _WIRELOG_ENABLED = os.getenv("IRACING_WIRE_LOG", "0") == "1"
 _WIRELOG_DIR = os.getenv("IRACING_WIRE_LOG_DIR", "/app/wirelogs")
+# Debug: Print to stderr to ensure visibility
+import sys
 if _WIRELOG_ENABLED:
+    print(f"DEBUG: Wirelog ENABLED → dir={_WIRELOG_DIR}", file=sys.stderr)
     log.info("Wirelog ENABLED → dir=%s", _WIRELOG_DIR)
 
 def _wirelog_write(step: str, service: str, method: str,
