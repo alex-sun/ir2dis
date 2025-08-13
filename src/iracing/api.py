@@ -5,6 +5,7 @@ import aiohttp, asyncio, time, os, json, datetime as _dt, pathlib, uuid
 import logging
 
 logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 def _hash_password(raw_password: str, email: str) -> str:
     """Hash password according to iRacing requirements: Base64(SHA256(password + lower(email)))"""
@@ -23,6 +24,8 @@ class AuthError(APIError):
 
 _WIRELOG_ENABLED = os.getenv("IRACING_WIRE_LOG", "0") == "1"
 _WIRELOG_DIR = os.getenv("IRACING_WIRE_LOG_DIR", "/app/wirelogs")
+if _WIRELOG_ENABLED:
+    log.info("Wirelog ENABLED → dir=%s", _WIRELOG_DIR)
 
 def _wirelog_write(step: str, service: str, method: str,
                    req_headers: dict, req_params: dict, req_body: str,
@@ -64,6 +67,7 @@ def _wirelog_write(step: str, service: str, method: str,
             body_path.write_bytes(resp_content or b"")
         except Exception:
             pass
+        log.info("Wirelog wrote %s", meta_path)
     except Exception:
         # never break the client due to logging
         pass
