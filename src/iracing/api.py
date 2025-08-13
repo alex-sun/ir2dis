@@ -1,7 +1,7 @@
 import base64
 import hashlib
 from typing import Any, Dict, List, Optional
-import aiohttp, asyncio, time
+import aiohttp, asyncio, time, os, json, datetime as _dt, pathlib, uuid
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,53 @@ class APIError(Exception):
 class AuthError(APIError):
     """Raised when authentication appears to be invalid/expired."""
     pass
+
+_WIRELOG_ENABLED = os.getenv("IRACING_WIRE_LOG", "0") == "1"
+_WIRELOG_DIR = os.getenv("IRACING_WIRE_LOG_DIR", "/app/wirelogs")
+
+def _wirelog_write(step: str, service: str, method: str,
+                   req_headers: dict, req_params: dict, req_body: str,
+                   resp_status: int, resp_headers: dict, resp_text_preview: str, resp_content: bytes,
+                   duration_ms: int, corr: str) -> None:
+    if not _WIRELOG_ENABLED:
+        return
+    try:
+        day = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        ts = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S.%fZ")
+        outdir = pathlib.Path(_WIRELOG_DIR) / day
+        outdir.mkdir(parents=True, exist_ok=True)
+        base = f"{ts}_{corr}_{service}_{method}_{step}_{resp_status}"
+        meta_path = outdir / f"{base}.json"
+        # request body (best-effort)
+        meta = {
+            "timestamp": ts,
+            "step": step,  # "link" or "download"
+            "service": service,
+            "method": method,
+            "correlation_id": corr,
+            "duration_ms": duration_ms,
+            "request": {
+                "headers": req_headers or {},
+                "params": req_params or {},
+                "body": req_body,
+            },
+            "response": {
+                "status": resp_status,
+                "headers": resp_headers or {},
+                "body_preview": resp_text_preview[:5000],
+            },
+        }
+        with meta_path.open("w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        # raw body (full bytes)
+        body_path = outdir / f"{base}.body"
+        try:
+            body_path.write_bytes(resp_content or b"")
+        except Exception:
+            pass
+    except Exception:
+        # never break the client due to logging
+        pass
 
 class IRacingClient:
     AUTH_URL = "https://members-ng.iracing.com/auth"
@@ -111,6 +158,10 @@ class IRacingClient:
                         raise APIError(f"{prefix}: {r.status} (host={self.BASE_URL}, params={normalized_params}, body={body!r})")
                     
                     # Step 1: request link
+                    corr = uuid.uuid4().hex[:8]
+                    svc, api_method = (path.split("/", 1) + [""])[:2] if "/" in path else (path, "")
+                    
+                    start = time.monotonic()
                     async with self.session.get(
                         f"{self.BASE_URL}/data/{path.lstrip('/')}",
                         params=normalized_params,
@@ -118,6 +169,7 @@ class IRacingClient:
                         timeout=aiohttp.ClientTimeout(total=30),
                         allow_redirects=True
                     ) as response:
+                        end = time.monotonic()
                         if response.status in (401, 403):
                             # one re-login attempt if available
                             if hasattr(self, "login") and callable(getattr(self, "login")):
@@ -146,14 +198,35 @@ class IRacingClient:
                         download_link = link_data.get("link")
                         if not download_link:
                             raise APIError(f"No 'link' in response for {path} (host={self.BASE_URL}, params={normalized_params}, body={str(link_data)[:200]!r})")
+                        
+                        # Log the link step
+                        try:
+                            req_body = ""
+                            try:
+                                if hasattr(response.request_info, 'headers'):
+                                    req_headers = dict(response.request_info.headers)
+                                else:
+                                    req_headers = {}
+                                resp_text_preview = response.text[:5000] if hasattr(response, 'text') and response.text else ""
+                                _wirelog_write("link", svc, api_method,
+                                             req_headers, normalized_params, req_body,
+                                             response.status, dict(response.headers or {}), 
+                                             resp_text_preview, response.content.read() if hasattr(response, 'content') else b"",
+                                             int((end - start) * 1000), corr)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                     
                     # Step 2: download the payload using the SAME session
+                    start2 = time.monotonic()
                     async with self.session.get(
                         download_link,
                         headers={"User-Agent": "IR2DIS Bot"},
                         timeout=aiohttp.ClientTimeout(total=60),
                         allow_redirects=True
                     ) as data_response:
+                        end2 = time.monotonic()
                         if data_response.status in (401, 403):
                             # try one re-login here too
                             if hasattr(self, "login") and callable(getattr(self, "login")):
@@ -179,6 +252,23 @@ class IRacingClient:
                             logger.debug("GET %s → type=%s keys=%s",
                                          path, type(obj).__name__,
                                          list(obj.keys())[:5] if isinstance(obj, dict) else "n/a")
+                            
+                            # Log the download step
+                            try:
+                                req_headers = {}
+                                resp_text_preview = ""
+                                try:
+                                    resp_text_preview = data_response.text[:5000] if hasattr(data_response, 'text') and data_response.text else ""
+                                except Exception:
+                                    pass
+                                _wirelog_write("download", svc, api_method,
+                                             req_headers, None, "",
+                                             data_response.status, dict(data_response.headers or {}), 
+                                             resp_text_preview, data_response.content.read() if hasattr(data_response, 'content') else b"",
+                                             int((end2 - start2) * 1000), corr)
+                            except Exception:
+                                pass
+                            
                             return obj
                         except Exception:
                             _raise_with_body(f"Non-JSON payload for {path}", data_response)
