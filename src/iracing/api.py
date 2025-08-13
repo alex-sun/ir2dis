@@ -169,26 +169,36 @@ class IRacingClient:
         })
 
     # --- Back-compat shim for poller ---
-    def search_recent_sessions(
-        self,
-        *,
-        cust_id: int,
-        start_time: int | None = None,
-        end_time: int | None = None,
-        simsession_type: int | None = None,
-        results_only: bool = True,
-        include_qualified: bool = False,
-        include_unofficial: bool = True,
-        limit: int | None = None,
-    ):
+    def search_recent_sessions(self, *, cust_id: int, **kwargs):
         """
         Backward-compatible replacement for the old results/search call.
-        We now use stats/member_recent_races (official only) and ignore
-        unsupported filters. Returns rows that at least include 'subsession_id',
-        which is what the poller needs to fetch full results.
+        We now use stats/member_recent_races (official only).
+        Accepts legacy kwargs (start_time_epoch_s, end_time_epoch_s, start_time, end_time,
+        simsession_type, results_only, include_qualified, include_unofficial, limit, max_results)
+        but ignores unsupported filters. Returns a list of rows that include 'subsession_id'.
         """
-        # For backward compatibility, we'll use the new NG endpoints
-        # The old method had many parameters but we can map them appropriately
+        # Extract a limit from any legacy key; ignore the rest (we're using "recent official")
+        limit = None
+        for k in ("limit", "max_results"):
+            if k in kwargs and kwargs[k] is not None:
+                try:
+                    limit = int(kwargs[k])
+                except Exception:
+                    limit = None
+                break
+
+        # Friendly note if someone thinks unofficial/qualified filters apply here
+        iu = kwargs.get("include_unofficial")
+        iq = kwargs.get("include_qualified")
+        if iu or iq:
+            logger.debug(
+                "search_recent_sessions: ignoring unsupported filters "
+                "(include_unofficial=%r, include_qualified=%r) for stats/member_recent_races",
+                iu, iq
+            )
+
+        # These legacy time keys are accepted but ignored in this shim:
+        # start_time_epoch_s, end_time_epoch_s, start_time, end_time, simsession_type, results_only
         rows = self.stats_member_recent_races(cust_id) or []
         if limit is not None and limit >= 0:
             rows = rows[:limit]
