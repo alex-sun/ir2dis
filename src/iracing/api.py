@@ -16,6 +16,11 @@ class APIError(Exception):
     """Raised for non-200 or malformed iRacing API responses."""
     pass
 
+
+class AuthError(APIError):
+    """Raised when authentication appears to be invalid/expired."""
+    pass
+
 class IRacingClient:
     AUTH_URL = "https://members-ng.iracing.com/auth"
     BASE_URL = "https://members-ng.iracing.com"  # data API host
@@ -32,7 +37,7 @@ class IRacingClient:
         if self.session and not self.session.closed:
             await self.session.close()
         
-    async def login(self) -> None:
+    async def login(self, force: bool = False) -> None:
         """Authenticate with iRacing using the new salted+hashed password flow."""
         logger.info("Starting iRacing authentication...")
         
@@ -97,47 +102,82 @@ class IRacingClient:
                     # Normalize params before sending to API
                     normalized_params = self._normalize_params(params)
                     
-                    # First, get the download link
+                    def _raise_with_body(prefix: str, r):
+                        body = ""
+                        try:
+                            body = (r.text or "")[:200]
+                        except Exception:
+                            pass
+                        raise APIError(f"{prefix}: {r.status} (host={self.BASE_URL}, params={normalized_params}, body={body!r})")
+                    
+                    # Step 1: request link
                     async with self.session.get(
                         f"{self.BASE_URL}/data/{path.lstrip('/')}",
                         params=normalized_params,
                         headers={"User-Agent": "IR2DIS Bot"},
-                        timeout=aiohttp.ClientTimeout(total=30)
+                        timeout=aiohttp.ClientTimeout(total=30),
+                        allow_redirects=True
                     ) as response:
-                        if response.status == 429:
-                            # Rate limited - implement exponential backoff
-                            delay = base_delay * (2 ** attempt) + (attempt * 0.1)  # Add jitter
-                            delay = min(delay, 60)  # Cap at 60 seconds
-                            logger.warning(f"Rate limited on {path}, retrying in {delay:.2f}s")
-                            await asyncio.sleep(delay)
-                            continue
-                        
-                        if response.status >= 500:
-                            # Server error - implement exponential backoff
-                            delay = base_delay * (2 ** attempt) + (attempt * 0.1)  # Add jitter
-                            delay = min(delay, 60)  # Cap at 60 seconds
-                            logger.warning(f"Server error on {path}, retrying in {delay:.2f}s")
-                            await asyncio.sleep(delay)
-                            continue
-                        
+                        if response.status in (401, 403):
+                            # one re-login attempt if available
+                            if hasattr(self, "login") and callable(getattr(self, "login")):
+                                try:
+                                    await self.login(force=True)  # implement force=True to refresh cookies if you can
+                                except Exception:
+                                    pass
+                                response = await self.session.get(
+                                    f"{self.BASE_URL}/data/{path.lstrip('/')}",
+                                    params=normalized_params,
+                                    headers={"User-Agent": "IR2DIS Bot"},
+                                    timeout=aiohttp.ClientTimeout(total=30),
+                                    allow_redirects=True
+                                )
+                            if response.status in (401, 403):
+                                body = (response.text or "")[:200]
+                                raise AuthError(f"Auth required/expired for {path}: {response.status} (params={normalized_params}, body={body!r})")
                         if response.status != 200:
-                            raise APIError(f"Failed to get download link for {path}: {response.status} (host={self.BASE_URL}, params={normalized_params})")
+                            _raise_with_body(f"Failed to get download link for {path}", response)
                         
-                        link_data = await response.json()
+                        # Parse link
+                        try:
+                            link_data = await response.json()
+                        except Exception:
+                            _raise_with_body(f"Non-JSON link response for {path}", response)
                         download_link = link_data.get("link")
-                        
                         if not download_link:
-                            raise APIError(f"No download link found in response for {path}")
+                            raise APIError(f"No 'link' in response for {path} (host={self.BASE_URL}, params={normalized_params}, body={str(link_data)[:200]!r})")
                     
-                    # Now fetch the actual JSON data from the download link
+                    # Step 2: download the payload using the SAME session
                     async with self.session.get(
                         download_link,
                         headers={"User-Agent": "IR2DIS Bot"},
-                        timeout=aiohttp.ClientTimeout(total=60)
+                        timeout=aiohttp.ClientTimeout(total=60),
+                        allow_redirects=True
                     ) as data_response:
+                        if data_response.status in (401, 403):
+                            # try one re-login here too
+                            if hasattr(self, "login") and callable(getattr(self, "login")):
+                                try:
+                                    await self.login(force=True)
+                                except Exception:
+                                    pass
+                                data_response = await self.session.get(
+                                    download_link,
+                                    headers={"User-Agent": "IR2DIS Bot"},
+                                    timeout=aiohttp.ClientTimeout(total=60),
+                                    allow_redirects=True
+                                )
+                            if data_response.status in (401, 403):
+                                body = (data_response.text or "")[:200]
+                                raise AuthError(f"Auth required/expired for download of {path}: {data_response.status} (body={body!r})")
                         if data_response.status != 200:
-                            raise Exception(f"Failed to fetch data from download link: {data_response.status}")
+                            _raise_with_body(f"Failed to download payload for {path}", data_response)
                         
+                        try:
+                            return await data_response.json()
+                        except Exception:
+                            _raise_with_body(f"Non-JSON payload for {path}", data_response)
+                    
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     if attempt == max_retries - 1:
                         logger.error(f"Max retries exceeded for {path}: {e}")

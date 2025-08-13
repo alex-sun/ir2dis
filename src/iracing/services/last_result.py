@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Optional, Dict, Any
 
-from iracing.api import IRacingClient
+from iracing.api import IRacingClient, APIError
 from iracing.service import FinishRecord
 
 logger = logging.getLogger(__name__)
