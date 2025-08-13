@@ -14,7 +14,7 @@ from iracing.service import FinishRecord
 logger = logging.getLogger(__name__)
 
 
-async def fetch_last_official_result(api: IRacingClient, cust_id: int) -> FinishRecord | None:
+def fetch_last_official_result(api: IRacingClient, cust_id: int) -> FinishRecord | None:
     """
     Return the most recent **completed official** race result for the given cust_id,
     shaped exactly like the object the poller passes into the renderer.
@@ -34,7 +34,7 @@ async def fetch_last_official_result(api: IRacingClient, cust_id: int) -> Finish
     
     try:
         # Get last 10 official races for the member (fast path)
-        payload = await api.stats_member_recent_races(cust_id) or {}
+        payload = api.stats_member_recent_races(cust_id) or {}
         if isinstance(payload, dict):
             rows = payload.get("races", []) or []
         elif isinstance(payload, list):
@@ -50,7 +50,7 @@ async def fetch_last_official_result(api: IRacingClient, cust_id: int) -> Finish
         subsession_id = int(latest.get("subsession_id"))
         
         # Fetch full session result (what the poller uses to render embeds)
-        results = await api.results_get(subsession_id, include_licenses=False)
+        results = api.results_get(subsession_id, include_licenses=False)
         
         # Find this driver's result in the session
         driver_result = None

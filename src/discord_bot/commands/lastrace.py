@@ -5,6 +5,7 @@ This command provides identical output to what the poller posts when it detects 
 
 from __future__ import annotations
 import asyncio
+import inspect
 import logging
 import discord
 from discord import app_commands, Interaction
@@ -60,11 +61,12 @@ class LastraceCommand(commands.Cog):
 
         try:
             embed = build_race_result_embed(result)
-            await interaction.followup.send(embed=embed)
-            logger.info(f"lastrace: Successfully sent embed for driver {customer_id}")
         except Exception as e:
-            logger.error("lastrace: Error sending embed for %s: %s", customer_id, e)
-            await interaction.followup.send(f"Failed to format and send race result for {customer_id}.", ephemeral=True)
+            logger.exception("lastrace: render error for %s: %s (type=%s)", customer_id, e, type(result).__name__)
+            await interaction.followup.send("Failed to render race result.", ephemeral=True)
+            return
+        await interaction.followup.send(embed=embed)
+        logger.info(f"lastrace: Successfully sent embed for driver {customer_id}")
 
 
 async def setup(bot: commands.Bot):
