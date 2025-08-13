@@ -140,6 +140,10 @@ python src/test_setup.py
 
 MIT
 
+## iRacing API Documentation
+
+For detailed information about the iRacing Data API endpoints used by this bot, please refer to the [IRACING_API.md](IRACING_API.md) file.
+
 ### Instant Slash Commands in Dev
 Discord can take up to ~1 hour to propagate **global** slash commands. To avoid "Unknown Integration" during development, this repo syncs commands to a specific guild on startup:
 
