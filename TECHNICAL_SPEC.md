@@ -60,8 +60,15 @@ src/
 
 ### Endpoints Used
 1. `lookup/drivers` - Driver name resolution
-2. `results/search` - Session search by driver ID and time window
+2. `stats/member_recent_races` - Get last 10 official races for a member (fast path)
 3. `results/get` - Full session results retrieval
+
+### API Endpoint Changes
+The bot previously used the deprecated `/data/results/search` endpoint which no longer exists on the NG API. This has been replaced with:
+- **stats/member_recent_races**: Returns last 10 official races for a member (fast path)
+- **results/get**: Fetch full session result once you have a subsession_id
+
+This change resolves the 404 errors that were occurring when calling non-existent endpoints.
 
 ## Database Schema
 
