@@ -29,7 +29,8 @@ class IR2DISBot(commands.Bot):
             "discord_bot.commands.untrack",
             "discord_bot.commands.list_tracked",
             "discord_bot.commands.set_channel",
-            "discord_bot.commands.test_post"
+            "discord_bot.commands.test_post",
+            "discord_bot.commands.lastrace"  # Add our new command
         ]
         
         loaded_extensions = []

@@ -4,3 +4,4 @@
 .clinerules/
 .env
 *.pyc
+wirelogs/
